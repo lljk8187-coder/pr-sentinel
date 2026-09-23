@@ -1,7 +1,7 @@
 [project]
 name = "pr-sentinel"
-version = "0.6.0"
-description = "PR quality gate — M6 pathspec ignore + large_files heuristics"
+version = "0.9.0"
+description = "PR quality gate — Phase2/M9 complete: job detail API, findings writeback, Check Run, CI"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

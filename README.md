@@ -1,10 +1,10 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M9**：任务成功后 findings / report_md / check_run_id 写回 Postgres；`GET /jobs/{id}` 与控制台详情页。M8：GitHub Check Run（annotations）+ 高危 inline comments。M7：GitHub Actions CI（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节启发。
+GitHub PR 质量闸门 — **Phase2 收口（M9 / 0.9.0）**：任务成功后 findings / report_md / check_run_id 写回 Postgres；`GET /jobs/{id}` 与控制台详情页。M8：GitHub Check Run（annotations）+ 高危 inline comments。M7：GitHub Actions CI（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节启发。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
-## 架构（M5）
+## 架构（Phase2）
 
 ```
 GitHub / smee.io ──► apps/api (FastAPI)
@@ -229,7 +229,7 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 ## Phase2 M7：GitHub Actions CI
 
 - Workflow：`.github/workflows/ci.yml`（`push`/`pull_request` → `main`）。
-- Job `test`：Python 3.11 + Postgres 16 service；应用 `sql/001_jobs.sql` 后 `pytest -q`。
+- Job `test`：`ubuntu-24.04` + Python 3.11 + Postgres 16 service；`actions/checkout@v7` / `setup-python@v7`；应用 `sql/001_jobs.sql` 后 `pytest -q`。
 - Redis 不作为 CI service（fakeredis）。
 
 
@@ -265,7 +265,7 @@ pytest -q
 
 [![CI](https://github.com/lljk8187-coder/pr-sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/lljk8187-coder/pr-sentinel/actions/workflows/ci.yml)
 
-Push / PR 到 `main` 时，[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) 在 `ubuntu-latest` + Python 3.11 上跑：
+Push / PR 到 `main` 时，[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) 在 `ubuntu-24.04` + Python 3.11 上跑：
 
 - **Postgres 16** service（`prsentinel` / `prsentinel` / `prsentinel`，健康检查后注入 `DATABASE_URL`）
 - `pip install -r requirements.txt` → 用 asyncpg 应用 `sql/001_jobs.sql` → `pytest -q`
