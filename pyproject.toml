@@ -1,6 +1,6 @@
 [project]
 name = "pr-sentinel"
-version = "0.2.0"
+version = "0.4.0"
 description = "PR quality gate — M2 rules engine + config + App JWT"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,8 @@ dependencies = [
     "PyYAML>=6.0",
     "PyJWT>=2.8.0",
     "cryptography>=42.0.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

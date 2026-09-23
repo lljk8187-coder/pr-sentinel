@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PR Sentinel — 安装与配置</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #1a1a1a; }
+    body { max-width: 860px; margin: 1.5rem auto; padding: 0 1rem; background: #f6f7f9; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+    code, pre { background: #f0f2f5; border-radius: 4px; }
+    code { padding: 0.1rem 0.3rem; font-size: 0.85em; }
+    pre { padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; }
+    nav a { margin-right: 1rem; }
+    .muted { color: #666; }
+    ol li { margin: 0.4rem 0; }
+  </style>
+</head>
+<body>
+  <h1>PR Sentinel 安装 / 配置</h1>
+  <nav>
+    <a href="/">安装说明</a>
+    <a href="/console">控制台</a>
+    <a href="/health">/health</a>
+  </nav>
+
+  <div class="card">
+    <h2>1. 创建 GitHub App</h2>
+    <ol>
+      <li>GitHub → Settings → Developer settings → <strong>GitHub Apps</strong> → New。</li>
+      <li>Webhook URL：填 <a href="https://smee.io" target="_blank" rel="noopener">smee.io</a> channel，或公网 API <code>/webhooks/github</code>。</li>
+      <li>Webhook Secret：与环境变量 <code>GITHUB_WEBHOOK_SECRET</code> <strong>完全一致</strong>（即使用 smee 也建议验签）。</li>
+      <li>权限：Contents Read、Pull requests Read &amp; Write、Issues Read &amp; Write（sticky comment）。</li>
+      <li>事件：至少勾选 <code>Pull request</code>。</li>
+      <li>记下 <code>App ID</code>，下载 Private Key（PEM）。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>2. smee 本地转发</h2>
+    <pre>npx smee -u https://smee.io/YOUR_CHANNEL -t http://127.0.0.1:8000/webhooks/github</pre>
+    <p class="muted">生产环境把 App Webhook 指到公网 API，无需 smee。</p>
+  </div>
+
+  <div class="card">
+    <h2>3. 环境变量（见 <code>.env.example</code>）</h2>
+    <pre>GITHUB_WEBHOOK_SECRET=...
+GITHUB_APP_ID=...
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
+# 或 GITHUB_APP_PRIVATE_KEY_PATH=./app.pem
+REDIS_URL=redis://localhost:6379/0
+ADMIN_TOKEN=请换成足够长的随机串   # 控制台 /jobs /retry 鉴权
+OPENAI_API_KEY=                    # 可选；无则 rules-only
+WEBHOOK_SKIP_VERIFY=false
+USE_FIXTURES=false                 # 真机联调关 fixture</pre>
+    <p>未设置 <code>ADMIN_TOKEN</code> 时，<code>GET /jobs</code> 与 <code>POST /jobs/{id}/retry</code> 返回 <strong>503</strong>。</p>
+  </div>
+
+  <div class="card">
+    <h2>4. 启动</h2>
+    <pre>docker compose -f deploy/docker-compose.yml up --build
+# 控制台
+open http://localhost:8000/console
+curl http://localhost:8000/health</pre>
+    <p>装 App 到测试仓 → 开 PR → Worker 写 sticky comment → 在控制台看任务 / 失败重试。</p>
+    <p>完整演示：仓库 <code>docs/e2e-demo.md</code>。</p>
+  </div>
+</body>
+</html>

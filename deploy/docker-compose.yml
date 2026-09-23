@@ -1,6 +1,7 @@
-# PR Sentinel M1 — api + arq worker + redis + postgres (placeholder)
-#   docker compose -f deploy/docker-compose.yml up --build
+# PR Sentinel M4 — api (console) + arq worker + redis + postgres (placeholder)
+#   docker compose -f deploy/docker-compose.yml --env-file .env up --build
 #   curl http://localhost:8000/health
+#   open http://localhost:8000/console
 
 services:
   redis:
@@ -26,7 +27,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    # M1: empty DB placeholder; API does not connect yet
+    # Placeholder DB; API does not connect yet (jobs live in Redis)
 
   api:
     build:
@@ -42,6 +43,12 @@ services:
       FIXTURES_DIR: /app/tests/fixtures
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PR_SENTINEL_OPENAI_API_KEY: ${PR_SENTINEL_OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
       LOG_LEVEL: INFO
     depends_on:
       redis:
@@ -63,6 +70,10 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PR_SENTINEL_OPENAI_API_KEY: ${PR_SENTINEL_OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
       LOG_LEVEL: INFO
     depends_on:
       redis:

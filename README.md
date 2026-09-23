@@ -1,41 +1,56 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M3**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队 → Worker 读 **default branch** `.pr-sentinel.yml` → 拉 diff → **规则引擎 +（可选）OpenAI 兼容 LLM** → **Sticky** PR Comment（可重入 upsert）。
+GitHub PR 质量闸门 — **M4**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队（Redis 存档）→ Worker 规则(+可选 LLM) → Sticky Comment + **最小 Web 控制台**（任务列表 / 失败重试）。
 
-> 本阶段 **不做** 完整 Web UI / SaaS 化（留给 M4+）。
+> 本阶段 **不做** 完整 SaaS 多租户。
 
-## 架构（M3）
+## 架构（M4）
 
 ```
 GitHub / smee.io ──► apps/api (FastAPI)
                         │ HMAC-SHA256 (X-Hub-Signature-256)
                         │ Redis SET NX 去重 X-GitHub-Delivery
                         │ arq.enqueue_job("process_pr")
+                        │ record_job → Redis LIST/JSON（控制台 / 重试）
                         ▼ 尽快 202
-                     Redis (arq)
-                        │ max_tries=3 / job_timeout / Retry 退避
+                     Redis (arq + job store)
+                        │
                         ▼
                   apps/worker (arq)
-                        │ GET default_branch + contents/.pr-sentinel.yml
-                        │ deep_merge(DEFAULT_CONFIG, repo_yml)
-                        │ packages/github 拉 PR files（分页+截断）
-                        │ Rules / Rules+LLM（无密钥 → llm_skipped）
-                        │ privacy.redact_secrets 后再送 LLM
-                        └─► sticky issues/{n}/comments（update|recreate|skip_if_exists）
+                        │ 更新 job status: running / success / failed
+                        └─► sticky PR comment
+
+浏览器 ──► / 安装说明 · /console 任务列表与重试
+         GET /jobs · POST /jobs/{id}/retry（ADMIN_TOKEN）
 ```
 
 ## 目录
 
 ```
-apps/api/                 FastAPI：POST /webhooks/github
-apps/worker/              arq WorkerSettings + process_pr（重试）
-packages/common/          settings / arq 队列 / delivery 去重 / DEFAULT_CONFIG
-packages/github/          GitHub 客户端 + App JWT + 规则引擎 + llm.py + sticky
-examples/.pr-sentinel.yml 示例仓库配置
-.pr-sentinel.yml.example  同上（仓库根副本）
+apps/api/                 FastAPI：webhook + /console + /jobs
+apps/api/templates/       中文控制台 / 安装页（Jinja2）
+apps/worker/              arq WorkerSettings + process_pr
+packages/common/          settings / queue / job_store / DEFAULT_CONFIG
+packages/github/          GitHub 客户端 + 规则 + llm + sticky
+docs/e2e-demo.md          端到端演示
 deploy/docker-compose.yml
 tests/
 ```
+
+## 控制台
+
+| URL | 说明 |
+| --- | --- |
+| http://localhost:8000/ | 安装 / 配置说明（App、smee、环境变量） |
+| http://localhost:8000/console | 最近任务列表 + 失败重试 |
+| http://localhost:8000/health | 健康检查 |
+| `GET /jobs` | JSON 任务列表（需鉴权） |
+| `POST /jobs/{id}/retry` | 按 job id 或 delivery_id 重放入队 |
+
+鉴权：环境变量 `ADMIN_TOKEN`；请求头 `Authorization: Bearer <token>` 或 `X-Admin-Token`。  
+**未配置 `ADMIN_TOKEN` 时**，jobs 读写接口返回 **503**（见 [`.env.example`](./.env.example)）。
+
+完整联调步骤：[docs/e2e-demo.md](./docs/e2e-demo.md)。
 
 ## 配置（`.pr-sentinel.yml`）
 
@@ -89,6 +104,7 @@ tests/
 | **生产** | GitHub App：`GITHUB_APP_ID` + private key + webhook `installation.id` → JWT → installation token |
 | **本地 / 兜底** | `GITHUB_TOKEN`（PAT / fine-grained） |
 | **无凭据演示** | `USE_FIXTURES=true` 读 `tests/fixtures/`，不打真网 |
+| **控制台 API** | `ADMIN_TOKEN` + Bearer / `X-Admin-Token` |
 
 ## 本地 Webhook：smee + HMAC
 
@@ -107,6 +123,7 @@ npx smee -u https://smee.io/YOUR_CHANNEL -t http://127.0.0.1:8000/webhooks/githu
 ```bash
 GITHUB_WEBHOOK_SECRET=与 GitHub Webhook Secret 一致
 WEBHOOK_SKIP_VERIFY=false   # 本地也建议保持验签
+ADMIN_TOKEN=足够长的随机串
 ```
 
 仅在完全没有 Secret 的纯 curl 调试时才设 `WEBHOOK_SKIP_VERIFY=true`。
@@ -120,17 +137,21 @@ cd pr-sentinel
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# 可选：填入 OPENAI_API_KEY 启用 LLM；不填则自动降级
+# 填入 ADMIN_TOKEN；可选 OPENAI_API_KEY
 ```
 
 ### Docker Compose
 
 ```bash
-docker compose -f deploy/docker-compose.yml up --build
+docker compose -f deploy/docker-compose.yml --env-file .env up --build
 curl http://localhost:8000/health
+# 控制台
+open http://localhost:8000/console
 ```
 
-服务：`api`（:8000）+ `worker`（arq）+ `redis` + `postgres`（空库占位）。
+服务：`api`（:8000，含控制台）+ `worker`（arq）+ `redis` + `postgres`（空库占位）。
+
+端到端演示：[docs/e2e-demo.md](./docs/e2e-demo.md)。
 
 ### 本地分进程
 
@@ -141,13 +162,13 @@ redis-server
 # 终端 2 — API
 export PYTHONPATH=.:packages:packages/github:apps/api
 export USE_FIXTURES=true
+export ADMIN_TOKEN=dev-admin
 uvicorn main:app --app-dir apps/api --reload --port 8000
 
 # 终端 3 — arq Worker
 export PYTHONPATH=.:packages:packages/github:apps/worker
 export USE_FIXTURES=true
 python apps/worker/main.py
-# 或: arq apps.worker.main.WorkerSettings
 ```
 
 ## Sticky Comment 幂等
@@ -177,6 +198,8 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 ## Worker 重试（M3）
 
 `WorkerSettings`：`max_tries=3`、`job_timeout=300`、瞬态错误 `Retry(defer=…)` 退避。业务 skip（如 `summary_comment=false`）正常返回，不耗尽重试。
+
+控制台 **失败重试**（M4）会重新 `enqueue process_pr`，payload 从 Redis 存档读取。
 
 ## 测试
 

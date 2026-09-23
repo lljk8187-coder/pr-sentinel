@@ -17,6 +17,7 @@ import httpx  # noqa: E402
 from arq import Retry  # noqa: E402
 
 from common.config import CONFIG_FILENAME, load_repo_config  # noqa: E402
+from common.job_store import update_job_status_by_payload  # noqa: E402
 from common.queue import redis_settings_from_url  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 from pr_sentinel_github.analyzer import get_analyzer  # noqa: E402
@@ -169,10 +170,23 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
     """
     settings = ctx.get("settings") or get_settings()
     job_try = int(ctx.get("job_try") or 1)
+
+    async def _status(status: str, error: str | None = None) -> None:
+        try:
+            await update_job_status_by_payload(
+                settings.redis_url, job, status, error=error
+            )
+        except Exception:
+            logger.exception("job status update failed status=%s", status)
+
+    await _status("running")
     try:
-        return process_job(job, settings)
+        result = process_job(job, settings)
+        await _status("success")
+        return result
     except BusinessSkip as exc:
         logger.info("business skip: %s", exc.reason)
+        await _status("success", error=f"skipped:{exc.reason}")
         return exc.payload
     except Exception as exc:
         if _is_transient_http(exc):
@@ -185,6 +199,7 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
         # Non-transient (e.g. 4xx GitHub, programming errors): fail the job
         # without Retry so arq won't keep spinning on clear business failures.
         logger.exception("non-retryable error in process_pr: %s", exc)
+        await _status("failed", error=str(exc)[:500])
         raise
 
 

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PR Sentinel 控制台</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #1a1a1a; }
+    body { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; background: #f6f7f9; }
+    h1, h2 { margin-top: 1.5rem; }
+    nav a { margin-right: 1rem; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { border-bottom: 1px solid #eee; padding: 0.45rem 0.35rem; text-align: left; vertical-align: top; }
+    th { background: #f0f2f5; }
+    .status-queued { color: #666; }
+    .status-running { color: #0b5fff; }
+    .status-success { color: #0a7a2f; }
+    .status-failed { color: #b00020; font-weight: 600; }
+    code, pre { background: #f0f2f5; border-radius: 4px; }
+    code { padding: 0.1rem 0.3rem; font-size: 0.85em; }
+    pre { padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; }
+    .err { color: #b00020; font-size: 0.85em; }
+    .muted { color: #666; font-size: 0.85rem; }
+    .token-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
+    input[type=password], input[type=text] { padding: 0.35rem 0.5rem; min-width: 220px; }
+    button, .btn { padding: 0.35rem 0.75rem; cursor: pointer; background: #1a1a1a; color: #fff; border: none; border-radius: 4px; }
+    button:disabled { opacity: 0.5; }
+    .flash { padding: 0.6rem 0.8rem; border-radius: 6px; margin: 0.75rem 0; }
+    .flash-ok { background: #e6f6ea; border: 1px solid #8fd19e; }
+    .flash-err { background: #fde8ea; border: 1px solid #f0a0a8; }
+    ul.steps li { margin: 0.35rem 0; }
+  </style>
+</head>
+<body>
+  <h1>PR Sentinel 控制台</h1>
+  <p class="muted">M4 最小可用 · 任务列表来自 Redis · 重试需 <code>ADMIN_TOKEN</code></p>
+  <nav>
+    <a href="/console">控制台</a>
+    <a href="/">安装说明</a>
+    <a href="/health">/health</a>
+    <a href="/docs">OpenAPI</a>
+  </nav>
+
+  {% if flash %}
+  <div class="flash flash-{{ flash.kind }}">{{ flash.message }}</div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Admin Token</h2>
+    <p class="muted">写入/重试接口需要鉴权。未配置 <code>ADMIN_TOKEN</code> 时写接口返回 503。</p>
+    <form method="post" action="/console/set-token" class="token-row">
+      <input type="password" name="admin_token" placeholder="ADMIN_TOKEN" value="{{ admin_token or '' }}" />
+      <button type="submit">保存到 Cookie（仅本机控制台）</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>最近任务</h2>
+    {% if not jobs %}
+    <p class="muted">暂无任务。Webhook 成功入队后会出现在这里。</p>
+    {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>状态</th>
+          <th>仓库 / PR</th>
+          <th>SHA</th>
+          <th>delivery</th>
+          <th>时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td class="status-{{ j.status }}">{{ j.status }}{% if j.error %}<div class="err">{{ j.error }}</div>{% endif %}</td>
+          <td>{{ j.owner }}/{{ j.repo }} #{{ j.pr }}</td>
+          <td><code>{{ (j.sha or '')[:12] }}</code></td>
+          <td><code>{{ (j.delivery_id or '')[:16] }}</code></td>
+          <td class="muted">{{ j.created_at }}</td>
+          <td>
+            <form method="post" action="/console/retry/{{ j.id }}" style="display:inline">
+              <input type="hidden" name="admin_token" value="{{ admin_token or '' }}" />
+              <button type="submit" {% if not admin_token %}disabled title="先填写 ADMIN_TOKEN"{% endif %}>重试</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <p class="muted"><a href="/console">刷新</a> · API：<code>GET /jobs</code>（需 Bearer / X-Admin-Token）</p>
+  </div>
+
+  <div class="card">
+    <h2>快捷配置摘要</h2>
+    <ul class="steps">
+      <li>Compose：<code>docker compose -f deploy/docker-compose.yml up --build</code></li>
+      <li>控制台：<a href="http://localhost:8000/console">http://localhost:8000/console</a></li>
+      <li>Webhook：<code>POST /webhooks/github</code> · smee 转发到该地址</li>
+      <li>详文：见仓库 <code>docs/e2e-demo.md</code> 与首页 <a href="/">/</a></li>
+    </ul>
+  </div>
+</body>
+</html>

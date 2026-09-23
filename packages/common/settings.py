@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     openai_base_url: str = ""
     openai_model: str = ""
 
+    # M4 console / jobs API auth (empty → write endpoints return 503)
+    admin_token: str = ""
+    jobs_list_max: int = 100
+
     @property
     def skip_webhook_verify(self) -> bool:
         return self.webhook_skip_verify or self.allow_insecure_webhooks

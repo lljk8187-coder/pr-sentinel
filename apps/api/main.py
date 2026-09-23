@@ -1,4 +1,4 @@
-"""FastAPI webhook receiver for GitHub pull_request events (arq enqueue)."""
+"""FastAPI webhook receiver + M4 minimal console / jobs API."""
 
 from __future__ import annotations
 
@@ -11,8 +11,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Form, Header, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 
 _ROOT = Path(__file__).resolve().parents[2]
 for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
@@ -20,6 +21,11 @@ for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
+from common.job_store import (  # noqa: E402
+    list_jobs,
+    record_job,
+    resolve_job,
+)
 from common.queue import claim_delivery, create_arq_pool, enqueue_process_pr  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 
@@ -27,6 +33,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pr-sentinel.api")
 
 TARGET_ACTIONS = {"opened", "synchronize"}
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Injected in tests; production uses lifespan pool
 _arq_pool = None
@@ -50,8 +58,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="pr-sentinel",
-    version="0.2.0",
-    description="M2 quality-gate webhook API",
+    version="0.4.0",
+    description="M4 quality-gate webhook API + console",
     lifespan=lifespan,
 )
 
@@ -94,9 +102,169 @@ def extract_job_payload(event: str, payload: dict[str, Any]) -> dict[str, Any] |
     }
 
 
+def _extract_admin_token(
+    authorization: str | None,
+    x_admin_token: str | None,
+) -> str | None:
+    if x_admin_token:
+        return x_admin_token.strip() or None
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip() or None
+    return None
+
+
+def require_admin(
+    settings: Settings,
+    authorization: str | None = None,
+    x_admin_token: str | None = None,
+    form_token: str | None = None,
+) -> None:
+    """Enforce ADMIN_TOKEN. Unset → 503; mismatch → 403."""
+    expected = (settings.admin_token or "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_TOKEN not configured — set env to enable jobs API",
+        )
+    provided = form_token or _extract_admin_token(authorization, x_admin_token)
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
+async def _get_pool(settings: Settings):
+    global _arq_pool
+    pool = _arq_pool
+    if pool is None:
+        pool = await create_arq_pool(settings.redis_url)
+        _arq_pool = pool
+    return pool
+
+
+async def _retry_job(settings: Settings, id_or_delivery: str) -> dict[str, Any]:
+    record = await resolve_job(settings.redis_url, id_or_delivery)
+    if not record:
+        raise HTTPException(status_code=404, detail="job not found")
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="job has no payload archive")
+
+    pool = await _get_pool(settings)
+    arq_job_id = await enqueue_process_pr(pool, payload)
+    try:
+        new_record = await record_job(
+            settings.redis_url,
+            payload=payload,
+            status="queued",
+            arq_job_id=arq_job_id,
+            max_jobs=settings.jobs_list_max,
+        )
+    except Exception:
+        logger.exception("record_job after retry failed")
+        new_record = {"id": None, "status": "queued"}
+
+    return {
+        "status": "queued",
+        "retried_from": record.get("id"),
+        "job": {
+            "id": new_record.get("id"),
+            "delivery_id": payload.get("delivery_id"),
+            "owner": payload.get("owner"),
+            "repo": payload.get("repo"),
+            "pr": payload.get("pr_number"),
+            "sha": payload.get("head_sha"),
+            "status": "queued",
+            "arq_job_id": arq_job_id,
+        },
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "pr-sentinel-api"}
+
+
+@app.get("/", response_class=HTMLResponse)
+async def install_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "install.html", {})
+
+
+@app.get("/console", response_class=HTMLResponse)
+async def console_page(request: Request) -> HTMLResponse:
+    settings = get_settings()
+    jobs: list[dict[str, Any]] = []
+    try:
+        jobs = await list_jobs(settings.redis_url, limit=50)
+    except Exception:
+        logger.exception("list_jobs for console failed")
+    admin_token = request.cookies.get("pr_sentinel_admin_token") or ""
+    flash = None
+    if request.query_params.get("ok"):
+        flash = {"kind": "ok", "message": request.query_params.get("ok")}
+    if request.query_params.get("err"):
+        flash = {"kind": "err", "message": request.query_params.get("err")}
+    return templates.TemplateResponse(
+        request,
+        "console.html",
+        {"jobs": jobs, "admin_token": admin_token, "flash": flash},
+    )
+
+
+@app.post("/console/set-token")
+async def console_set_token(admin_token: str = Form(default="")) -> Response:
+    resp = RedirectResponse(url="/console", status_code=303)
+    if admin_token:
+        resp.set_cookie(
+            "pr_sentinel_admin_token",
+            admin_token,
+            httponly=True,
+            samesite="lax",
+            max_age=86400 * 7,
+        )
+    else:
+        resp.delete_cookie("pr_sentinel_admin_token")
+    return resp
+
+
+@app.post("/console/retry/{job_id}")
+async def console_retry(
+    job_id: str,
+    admin_token: str = Form(default=""),
+) -> Response:
+    settings = get_settings()
+    try:
+        require_admin(settings, form_token=admin_token or None)
+        result = await _retry_job(settings, job_id)
+        msg = f"已重试入队 job={result['job'].get('id')} arq={result['job'].get('arq_job_id')}"
+        return RedirectResponse(url=f"/console?ok={msg}", status_code=303)
+    except HTTPException as exc:
+        return RedirectResponse(url=f"/console?err={exc.detail}", status_code=303)
+    except Exception as exc:
+        logger.exception("console retry failed")
+        return RedirectResponse(url=f"/console?err={exc}", status_code=303)
+
+
+@app.get("/jobs")
+async def get_jobs(
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+    limit: int = 50,
+) -> dict[str, Any]:
+    settings = get_settings()
+    require_admin(settings, authorization=authorization, x_admin_token=x_admin_token)
+    jobs = await list_jobs(settings.redis_url, limit=min(max(limit, 1), 200))
+    return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.post("/jobs/{job_id}/retry")
+async def post_job_retry(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> JSONResponse:
+    settings = get_settings()
+    require_admin(settings, authorization=authorization, x_admin_token=x_admin_token)
+    result = await _retry_job(settings, job_id)
+    return JSONResponse(status_code=202, content=result)
 
 
 @app.post("/webhooks/github")
@@ -150,22 +318,40 @@ async def github_webhook(
 
     job["delivery_id"] = x_github_delivery
 
-    pool = _arq_pool
-    if pool is None:
-        pool = await create_arq_pool(settings.redis_url)
+    pool = await _get_pool(settings)
 
     job_id = await enqueue_process_pr(pool, job)
+
+    store_id = None
+    try:
+        stored = await record_job(
+            settings.redis_url,
+            payload=job,
+            status="queued",
+            arq_job_id=job_id,
+            max_jobs=settings.jobs_list_max,
+        )
+        store_id = stored.get("id")
+    except Exception:
+        logger.exception("record_job failed (enqueue already accepted)")
+
     logger.info(
-        "accepted PR %s#%s sha=%s delivery=%s arq=%s",
+        "accepted PR %s#%s sha=%s delivery=%s arq=%s store=%s",
         job["full_name"],
         job["pr_number"],
         (job.get("head_sha") or "")[:12],
         x_github_delivery,
         job_id,
+        store_id,
     )
     return JSONResponse(
         status_code=202,
-        content={"status": "queued", "job": job, "arq_job_id": job_id},
+        content={
+            "status": "queued",
+            "job": job,
+            "arq_job_id": job_id,
+            "store_job_id": store_id,
+        },
     )
 
 
