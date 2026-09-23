@@ -1,4 +1,4 @@
-"""arq worker: load config → fetch PR files → rules analyze → sticky comment."""
+"""arq worker: load config → fetch PR files → rules(+llm) analyze → sticky comment."""
 
 from __future__ import annotations
 
@@ -13,18 +13,34 @@ for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
+import httpx  # noqa: E402
+from arq import Retry  # noqa: E402
+
 from common.config import CONFIG_FILENAME, load_repo_config  # noqa: E402
 from common.queue import redis_settings_from_url  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 from pr_sentinel_github.analyzer import get_analyzer  # noqa: E402
 from pr_sentinel_github.client import GitHubClient  # noqa: E402
 from pr_sentinel_github.comments import upsert_pr_comment  # noqa: E402
+from pr_sentinel_github.llm import LLMTransientError  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger("pr-sentinel.worker")
+
+# Business / non-retryable outcomes (caller may return these without raising).
+SKIP_ACTIONS = frozenset({"skipped_comment", "skip", "skipped"})
+
+
+class BusinessSkip(Exception):
+    """Intentional skip — do not consume arq retries."""
+
+    def __init__(self, reason: str, payload: dict[str, Any] | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.payload = payload or {"_action": "skipped", "reason": reason}
 
 
 def build_client(settings: Settings, installation_id: int | None = None) -> GitHubClient:
@@ -72,8 +88,19 @@ def _load_job_config(
     return load_repo_config(fetch_yml=fetch_yml)
 
 
+def _is_transient_http(exc: BaseException) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code >= 500 or code == 429
+    if isinstance(exc, LLMTransientError):
+        return True
+    return False
+
+
 def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[str, Any]:
-    """Synchronous job body (also callable from tests)."""
+    """Synchronous job body (also callable from tests). Re-entrant sticky upsert."""
     settings = settings or get_settings()
 
     owner = job["owner"]
@@ -135,9 +162,30 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
 
 
 async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
-    """arq function name must match enqueue_job('process_pr', …)."""
+    """arq function name must match enqueue_job('process_pr', …).
+
+    Transient network/5xx/timeout → ``Retry`` with backoff (up to max_tries).
+    Business skips return normally (no infinite retry).
+    """
     settings = ctx.get("settings") or get_settings()
-    return process_job(job, settings)
+    job_try = int(ctx.get("job_try") or 1)
+    try:
+        return process_job(job, settings)
+    except BusinessSkip as exc:
+        logger.info("business skip: %s", exc.reason)
+        return exc.payload
+    except Exception as exc:
+        if _is_transient_http(exc):
+            # Exponential-ish backoff: 5, 10, 20… capped at 60s
+            defer = min(60, 5 * (2 ** max(0, job_try - 1)))
+            logger.warning(
+                "transient error try=%s defer=%ss: %s", job_try, defer, exc
+            )
+            raise Retry(defer=defer) from exc
+        # Non-transient (e.g. 4xx GitHub, programming errors): fail the job
+        # without Retry so arq won't keep spinning on clear business failures.
+        logger.exception("non-retryable error in process_pr: %s", exc)
+        raise
 
 
 async def on_startup(ctx: dict[str, Any]) -> None:
@@ -151,6 +199,10 @@ class WorkerSettings:
     functions = [process_pr]
     on_startup = on_startup
     redis_settings = redis_settings_from_url(get_settings().redis_url)
+    # M3: failure retries with timeout
+    max_tries = 3
+    job_timeout = 300  # seconds
+    retry_jobs = True
 
 
 if __name__ == "__main__":

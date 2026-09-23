@@ -1,10 +1,10 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M2**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队 → Worker 读 **default branch** `.pr-sentinel.yml` → 拉 diff → **规则引擎** → **Sticky** PR Comment（`update_strategy`）。
+GitHub PR 质量闸门 — **M3**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队 → Worker 读 **default branch** `.pr-sentinel.yml` → 拉 diff → **规则引擎 +（可选）OpenAI 兼容 LLM** → **Sticky** PR Comment（可重入 upsert）。
 
-> 本阶段 **不做** 完整 LLM / Web UI / SaaS 化（留给后续里程碑）。
+> 本阶段 **不做** 完整 Web UI / SaaS 化（留给 M4+）。
 
-## 架构（M2）
+## 架构（M3）
 
 ```
 GitHub / smee.io ──► apps/api (FastAPI)
@@ -13,14 +13,14 @@ GitHub / smee.io ──► apps/api (FastAPI)
                         │ arq.enqueue_job("process_pr")
                         ▼ 尽快 202
                      Redis (arq)
-                        │
+                        │ max_tries=3 / job_timeout / Retry 退避
                         ▼
                   apps/worker (arq)
                         │ GET default_branch + contents/.pr-sentinel.yml
                         │ deep_merge(DEFAULT_CONFIG, repo_yml)
                         │ packages/github 拉 PR files（分页+截断）
-                        │ RulesAnalyzer（secrets / large_files / weakened_tests）
-                        │ ignore_paths 先过滤
+                        │ Rules / Rules+LLM（无密钥 → llm_skipped）
+                        │ privacy.redact_secrets 后再送 LLM
                         └─► sticky issues/{n}/comments（update|recreate|skip_if_exists）
 ```
 
@@ -28,9 +28,9 @@ GitHub / smee.io ──► apps/api (FastAPI)
 
 ```
 apps/api/                 FastAPI：POST /webhooks/github
-apps/worker/              arq WorkerSettings + process_pr
-packages/common/          settings / arq 队列 / delivery 去重 / DEFAULT_CONFIG / 配置合并
-packages/github/          GitHub 客户端 + App JWT + 规则引擎 + sticky comment
+apps/worker/              arq WorkerSettings + process_pr（重试）
+packages/common/          settings / arq 队列 / delivery 去重 / DEFAULT_CONFIG
+packages/github/          GitHub 客户端 + App JWT + 规则引擎 + llm.py + sticky
 examples/.pr-sentinel.yml 示例仓库配置
 .pr-sentinel.yml.example  同上（仓库根副本）
 deploy/docker-compose.yml
@@ -55,14 +55,38 @@ tests/
 | `rules.secrets` | patch/文件名正则 |
 | `rules.large_files` | 按 patch 长度 / additions 启发式 |
 | `rules.weakened_tests` | 删除测试文件或 assert 净减少 |
-| `analyzer.mode` | `rules`（默认）或 `fake` |
+| `privacy.redact_secrets` | 送入 LLM 前对文本做密钥 redact（`***REDACTED***`） |
+| `llm.enabled` | 是否启用 LLM（仍需 API Key） |
+| `llm.max_patch_chars` | 送入 LLM 的 patch 截断长度（默认 12000） |
+| `llm.temperature` | 默认 `0.2` |
+| `analyzer.mode` | `rules` / `rules+llm`（默认）/ `fake`；无密钥时 `rules+llm` 自动降级 |
 | `diff.max_*` | 分页与截断；截断时报告正文声明 **Limits 截断** |
+
+## LLM（OpenAI 兼容）
+
+环境变量（见 [`.env.example`](./.env.example)）：
+
+| 变量 | 说明 |
+| --- | --- |
+| `OPENAI_API_KEY` 或 `PR_SENTINEL_OPENAI_API_KEY` | API Key；后者优先 |
+| `OPENAI_BASE_URL` | 可选，默认 `https://api.openai.com/v1` |
+| `OPENAI_MODEL` | 可选，默认 `gpt-4o-mini` |
+
+行为：
+
+- 使用 **httpx** `POST {BASE}/chat/completions`（不强依赖 openai SDK）。
+- **无密钥**：跳过 LLM；报告 `Assumptions` 标明 `llm_skipped: true` 与原因；规则引擎照常跑。
+- 输入：变更摘要（文件列表 + 规则 findings）+ **截断后的 patch**；若 `privacy.redact_secrets=true` 则先 redact。
+- 瞬态错误（超时 / 网络 / 5xx / 429）→ 异常冒泡，arq `Retry` 退避（`max_tries=3`）。
+- 明确 4xx（如 401）→ 软跳过 LLM（写入 assumptions），不无限重试。
+
+报告 Markdown 含：总览与 **severity**、规则发现、LLM 发现（或 skipped）、assumptions、Limits 截断声明。Finding：`{source: rules|llm, severity, title, detail, path?}`。
 
 ## 认证
 
 | 场景 | 方式 |
 | --- | --- |
-| **生产** | GitHub App：`GITHUB_APP_ID` + private key + webhook `installation.id` → JWT → `POST /app/installations/{id}/access_tokens` |
+| **生产** | GitHub App：`GITHUB_APP_ID` + private key + webhook `installation.id` → JWT → installation token |
 | **本地 / 兜底** | `GITHUB_TOKEN`（PAT / fine-grained） |
 | **无凭据演示** | `USE_FIXTURES=true` 读 `tests/fixtures/`，不打真网 |
 
@@ -96,6 +120,7 @@ cd pr-sentinel
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+# 可选：填入 OPENAI_API_KEY 启用 LLM；不填则自动降级
 ```
 
 ### Docker Compose
@@ -137,6 +162,8 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - `recreate`：删旧再 `POST`。
 - `skip_if_exists`：已有 marker 则跳过。
 
+重复跑 `process_pr` 只会 sticky update，不刷屏。
+
 ## Diff 拉取
 
 `GET /repos/{owner}/{repo}/pulls/{n}/files`，分页 + 截断：
@@ -146,6 +173,10 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - `DIFF_MAX_FILES` / `diff.max_files`（默认 300）
 
 截断时报告中标注 **Limits 截断声明**。
+
+## Worker 重试（M3）
+
+`WorkerSettings`：`max_tries=3`、`job_timeout=300`、瞬态错误 `Retry(defer=…)` 退避。业务 skip（如 `summary_comment=false`）正常返回，不耗尽重试。
 
 ## 测试
 

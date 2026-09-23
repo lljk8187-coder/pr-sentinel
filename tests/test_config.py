@@ -28,7 +28,7 @@ def test_deep_merge_overlay_and_nested():
 
 def test_load_config_missing_falls_back():
     cfg, notes = load_config_from_text(None)
-    assert cfg["analyzer"]["mode"] == "rules"
+    assert cfg["analyzer"]["mode"] == "rules+llm"
     assert any("未找到" in n for n in notes)
 
 

@@ -8,14 +8,33 @@ from typing import Any, Protocol
 
 @dataclass
 class Finding:
+    """Unified finding from rules engine or LLM.
+
+    Suggested shape: ``{source, severity, title, detail, path?}``.
+    ``message`` / ``filename`` / ``rule_id`` kept for M2 rule compatibility.
+    """
+
     rule_id: str
-    severity: str  # info | warning | error
+    severity: str  # info | warning | error | low | medium | high | critical
     message: str
     filename: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
+    source: str = "rules"  # rules | llm
+    detail: str = ""
+
+    @property
+    def title(self) -> str:
+        return self.message
+
+    @property
+    def path(self) -> str | None:
+        return self.filename
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["title"] = self.title
+        d["path"] = self.path
+        return d
 
 
 class Rule(Protocol):

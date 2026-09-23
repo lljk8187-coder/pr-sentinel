@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     api_port: int = 8000
     log_level: str = "INFO"
 
+    # OpenAI-compatible LLM (optional; missing key → soft-skip LLM)
+    openai_api_key: str = ""
+    pr_sentinel_openai_api_key: str = ""
+    openai_base_url: str = ""
+    openai_model: str = ""
+
     @property
     def skip_webhook_verify(self) -> bool:
         return self.webhook_skip_verify or self.allow_insecure_webhooks

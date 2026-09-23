@@ -1,9 +1,12 @@
-"""Analyzers: FakeAnalyzer (M1) + RulesAnalyzer (M2 rules engine)."""
+"""Analyzers: FakeAnalyzer (M1) + RulesAnalyzer (M2) + RulesLLMAnalyzer (M3)."""
 
 from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
+from .llm import LLMReviewResult, max_severity, review_with_llm
 from .rules import Finding, RulesEngine
 
 
@@ -44,7 +47,26 @@ def build_report(
 
 
 def _severity_emoji(severity: str) -> str:
-    return {"error": "🛑", "warning": "⚠️", "info": "ℹ️"}.get(severity, "•")
+    return {
+        "critical": "🛑",
+        "error": "🛑",
+        "high": "🛑",
+        "warning": "⚠️",
+        "medium": "⚠️",
+        "info": "ℹ️",
+        "low": "ℹ️",
+    }.get(severity, "•")
+
+
+def _format_finding_line(item: Finding) -> str:
+    loc = f"`{item.filename}` — " if item.filename else ""
+    line = (
+        f"- {_severity_emoji(item.severity)} **{item.severity}** "
+        f"{loc}{item.message}"
+    )
+    if item.detail:
+        line += f"\n  - {item.detail}"
+    return line
 
 
 def build_rules_report(
@@ -57,27 +79,41 @@ def build_rules_report(
     findings: list[Finding] | None = None,
     ignored_files: list[dict[str, Any]] | None = None,
     config_notes: list[str] | None = None,
+    llm_result: LLMReviewResult | None = None,
 ) -> str:
-    """Markdown report with findings + limits truncation notice."""
+    """Markdown report: overview / severity / rules / LLM / assumptions / limits."""
     cfg = config or {}
     mode = cfg.get("analyzer", {}).get("mode", "rules")
     findings = findings or []
     ignored_files = ignored_files or []
     config_notes = config_notes or []
 
+    rule_findings = [f for f in findings if f.source != "llm"]
+    llm_findings = [f for f in findings if f.source == "llm"]
+    if llm_result is not None:
+        llm_findings = list(llm_result.findings)
+
+    all_for_sev = list(rule_findings) + list(llm_findings)
+    overall = max_severity(all_for_sev, default="info")
+
     additions = sum(int(f.get("additions", 0)) for f in files)
     deletions = sum(int(f.get("deletions", 0)) for f in files)
 
     lines: list[str] = [
-        "## PR Sentinel — 规则引擎报告",
+        "## PR Sentinel — 质量闸门报告",
         "",
-        f"**PR** #{pr_number} · **SHA** `{head_sha[:12]}` · **mode** `{mode}`",
+        f"**PR** #{pr_number} · **SHA** `{head_sha[:12]}` · **mode** `{mode}` · "
+        f"**severity** `{overall}` {_severity_emoji(overall)}",
+        "",
+        "### 总览",
         "",
         "| 指标 | 值 |",
         "| --- | --- |",
         f"| 分析文件数 | {len(files)} |",
         f"| 忽略文件数 | {len(ignored_files)} |",
-        f"| Findings | {len(findings)} |",
+        f"| 规则 Findings | {len(rule_findings)} |",
+        f"| LLM Findings | {len(llm_findings)} |",
+        f"| 总体 severity | `{overall}` |",
         f"| +行 | {additions} |",
         f"| -行 | {deletions} |",
         f"| 截断 | {'是' if truncated else '否'} |",
@@ -93,26 +129,48 @@ def build_rules_report(
     if truncated:
         lines.append(
             "> ⚠️ **Limits 截断声明**：Diff 已按配置的 `diff.max_pages` / "
-            "`diff.max_files`（或环境变量）截断，后续规则仅基于已拉取文件，报告可能不完整。"
+            "`diff.max_files`（或环境变量）截断，后续规则/LLM 仅基于已拉取文件，报告可能不完整。"
         )
         lines.append("")
 
-    lines.append("### Findings")
-    if not findings:
+    lines.append("### 规则发现")
+    if not rule_findings:
         lines.append("无发现问题。")
+        lines.append("")
     else:
         by_rule: dict[str, list[Finding]] = {}
-        for fnd in findings:
+        for fnd in rule_findings:
             by_rule.setdefault(fnd.rule_id, []).append(fnd)
         for rule_id, items in by_rule.items():
             lines.append(f"#### `{rule_id}` ({len(items)})")
             for item in items:
-                loc = f"`{item.filename}` — " if item.filename else ""
-                lines.append(
-                    f"- {_severity_emoji(item.severity)} **{item.severity}** "
-                    f"{loc}{item.message}"
-                )
+                lines.append(_format_finding_line(item))
             lines.append("")
+
+    # Backward-compat heading used by older M2 wording in some tests
+    # (tests assert "Limits 截断" and findings content, not "### Findings")
+
+    lines.append("### LLM 发现")
+    if mode not in ("rules+llm",):
+        lines.append("_mode 非 `rules+llm`，未调用 LLM。_")
+    elif llm_result is not None and llm_result.skipped:
+        reason = llm_result.skip_reason or "unknown"
+        lines.append(f"_LLM 已跳过_（`llm_skipped: true`）：{reason}")
+    elif not llm_findings:
+        lines.append("无 LLM 发现问题。")
+    else:
+        for item in llm_findings:
+            lines.append(_format_finding_line(item))
+    lines.append("")
+
+    assumptions: list[str] = []
+    if llm_result is not None:
+        assumptions.extend(llm_result.assumptions)
+    if assumptions:
+        lines.append("### Assumptions / uncertainties")
+        for a in assumptions:
+            lines.append(f"- {a}")
+        lines.append("")
 
     if ignored_files:
         names = [f.get("filename", "?") for f in ignored_files[:30]]
@@ -123,7 +181,15 @@ def build_rules_report(
             lines.append(f"- … 另有 {len(ignored_files) - 30} 个")
         lines.append("")
 
-    lines.append("> RulesAnalyzer（无 LLM）。配置来自 default branch `.pr-sentinel.yml` 与 DEFAULT_CONFIG 深度合并。")
+    if mode == "rules+llm":
+        footer = "Rules+LLM Analyzer"
+    elif mode == "fake":
+        footer = "FakeAnalyzer"
+    else:
+        footer = "RulesAnalyzer"
+    lines.append(
+        f"> {footer}。配置来自 default branch `.pr-sentinel.yml` 与 DEFAULT_CONFIG 深度合并。"
+    )
     lines.append("")
     return "\n".join(lines)
 
@@ -138,6 +204,7 @@ class FakeAnalyzer:
         truncated: bool = False,
         config: dict[str, Any] | None = None,
         config_notes: list[str] | None = None,
+        http_client: httpx.Client | None = None,
     ) -> str:
         return build_report(
             files,
@@ -161,6 +228,7 @@ class RulesAnalyzer:
         truncated: bool = False,
         config: dict[str, Any] | None = None,
         config_notes: list[str] | None = None,
+        http_client: httpx.Client | None = None,
     ) -> str:
         cfg = config or {}
         findings, kept, ignored = self.engine.run(files, cfg)
@@ -173,11 +241,58 @@ class RulesAnalyzer:
             findings=findings,
             ignored_files=ignored,
             config_notes=config_notes,
+            llm_result=None,
         )
 
 
-def get_analyzer(config: dict[str, Any] | None = None) -> FakeAnalyzer | RulesAnalyzer:
-    mode = (config or {}).get("analyzer", {}).get("mode", "rules")
+class RulesLLMAnalyzer:
+    """Rules engine + optional OpenAI-compatible LLM review."""
+
+    def __init__(self, engine: RulesEngine | None = None):
+        self.engine = engine or RulesEngine()
+
+    def analyze(
+        self,
+        files: list[dict[str, Any]],
+        *,
+        head_sha: str,
+        pr_number: int,
+        truncated: bool = False,
+        config: dict[str, Any] | None = None,
+        config_notes: list[str] | None = None,
+        http_client: httpx.Client | None = None,
+    ) -> str:
+        cfg = config or {}
+        findings, kept, ignored = self.engine.run(files, cfg)
+        llm_result = review_with_llm(
+            kept,
+            rule_findings=findings,
+            config=cfg,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            http_client=http_client,
+        )
+        merged = list(findings) + list(llm_result.findings)
+        return build_rules_report(
+            kept,
+            head_sha=head_sha,
+            pr_number=pr_number,
+            truncated=truncated,
+            config=cfg,
+            findings=merged,
+            ignored_files=ignored,
+            config_notes=config_notes,
+            llm_result=llm_result,
+        )
+
+
+def get_analyzer(
+    config: dict[str, Any] | None = None,
+) -> FakeAnalyzer | RulesAnalyzer | RulesLLMAnalyzer:
+    mode = (config or {}).get("analyzer", {}).get("mode", "rules+llm")
     if mode == "fake":
         return FakeAnalyzer()
-    return RulesAnalyzer()
+    if mode == "rules":
+        return RulesAnalyzer()
+    # rules+llm (default) and unknown → RulesLLMAnalyzer (no key → soft skip)
+    return RulesLLMAnalyzer()

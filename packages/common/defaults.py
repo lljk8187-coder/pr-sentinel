@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-# M2: in-memory defaults; worker deep_merges with default-branch `.pr-sentinel.yml`.
+# M3: in-memory defaults; worker deep_merges with default-branch `.pr-sentinel.yml`.
 DEFAULT_CONFIG: dict[str, Any] = {
     "version": 1,
     "summary_comment": True,
@@ -35,8 +35,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "enabled": True,
         },
     },
+    "privacy": {
+        "redact_secrets": True,
+    },
+    "llm": {
+        "enabled": True,
+        "max_patch_chars": 12000,
+        "temperature": 0.2,
+    },
     "analyzer": {
-        "mode": "rules",  # fake | rules (M2 uses rules; still no LLM)
+        # rules | rules+llm | fake — no API key → auto-degrade (skip LLM)
+        "mode": "rules+llm",
     },
 }
 

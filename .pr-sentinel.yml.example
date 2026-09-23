@@ -21,5 +21,11 @@ rules:
     max_bytes: 1048576
   weakened_tests:
     enabled: true
+privacy:
+  redact_secrets: true   # redact before sending patch text to LLM
+llm:
+  enabled: true
+  max_patch_chars: 12000
+  temperature: 0.2
 analyzer:
-  mode: rules   # fake | rules
+  mode: rules+llm   # rules | rules+llm | fake  (no API key → auto skip LLM)
