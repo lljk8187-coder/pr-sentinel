@@ -1,4 +1,4 @@
-"""FastAPI webhook receiver + M5 console / jobs API (Postgres job store)."""
+"""FastAPI webhook receiver + M5/M9 console / jobs API (Postgres job store)."""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
         sys.path.insert(0, sp)
 
 from common.job_store import (  # noqa: E402
+    _detail_view,
+    get_job,
     list_jobs,
     record_job,
     resolve_job,
@@ -58,8 +60,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="pr-sentinel",
-    version="0.5.0",
-    description="M5 quality-gate webhook API + console (jobs in Postgres)",
+    version="0.9.0",
+    description="M9 quality-gate webhook API + console job detail (jobs in Postgres)",
     lifespan=lifespan,
 )
 
@@ -229,18 +231,51 @@ async def console_set_token(admin_token: str = Form(default="")) -> Response:
 async def console_retry(
     job_id: str,
     admin_token: str = Form(default=""),
+    redirect_to: str = Form(default=""),
 ) -> Response:
     settings = get_settings()
+    # Allow detail page to bounce back; only internal /console paths
+    dest = "/console"
+    if redirect_to.startswith("/console"):
+        dest = redirect_to.split("?", 1)[0]
     try:
         require_admin(settings, form_token=admin_token or None)
         result = await _retry_job(settings, job_id)
         msg = f"已重试入队 job={result['job'].get('id')} arq={result['job'].get('arq_job_id')}"
-        return RedirectResponse(url=f"/console?ok={msg}", status_code=303)
+        sep = "&" if "?" in dest else "?"
+        # If retrying from detail of original job, land on list with flash
+        # (new job id differs); still allow detail redirect when same path used.
+        return RedirectResponse(url=f"{dest}{sep}ok={msg}", status_code=303)
     except HTTPException as exc:
-        return RedirectResponse(url=f"/console?err={exc.detail}", status_code=303)
+        sep = "&" if "?" in dest else "?"
+        return RedirectResponse(url=f"{dest}{sep}err={exc.detail}", status_code=303)
     except Exception as exc:
         logger.exception("console retry failed")
-        return RedirectResponse(url=f"/console?err={exc}", status_code=303)
+        sep = "&" if "?" in dest else "?"
+        return RedirectResponse(url=f"{dest}{sep}err={exc}", status_code=303)
+
+
+@app.get("/console/jobs/{job_id}", response_class=HTMLResponse)
+async def console_job_detail(request: Request, job_id: str) -> HTMLResponse:
+    settings = get_settings()
+    job = None
+    try:
+        record = await get_job(settings.database_url, job_id)
+        if record:
+            job = _detail_view(record)
+    except Exception:
+        logger.exception("get_job for console detail failed")
+    admin_token = request.cookies.get("pr_sentinel_admin_token") or ""
+    flash = None
+    if request.query_params.get("ok"):
+        flash = {"kind": "ok", "message": request.query_params.get("ok")}
+    if request.query_params.get("err"):
+        flash = {"kind": "err", "message": request.query_params.get("err")}
+    return templates.TemplateResponse(
+        request,
+        "job_detail.html",
+        {"job": job, "job_id": job_id, "admin_token": admin_token, "flash": flash},
+    )
 
 
 @app.get("/jobs")
@@ -253,6 +288,20 @@ async def get_jobs(
     require_admin(settings, authorization=authorization, x_admin_token=x_admin_token)
     jobs = await list_jobs(settings.database_url, limit=min(max(limit, 1), 200))
     return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.get("/jobs/{job_id}")
+async def get_job_detail(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> dict[str, Any]:
+    settings = get_settings()
+    require_admin(settings, authorization=authorization, x_admin_token=x_admin_token)
+    record = await get_job(settings.database_url, job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="job not found")
+    return _detail_view(record)
 
 
 @app.post("/jobs/{job_id}/retry")

@@ -34,7 +34,7 @@
 </head>
 <body>
   <h1>PR Sentinel 控制台</h1>
-  <p class="muted">M4 最小可用 · 任务列表来自 Redis · 重试需 <code>ADMIN_TOKEN</code></p>
+  <p class="muted">M9 任务详情 · 任务列表来自 Postgres · 重试需 <code>ADMIN_TOKEN</code></p>
   <nav>
     <a href="/console">控制台</a>
     <a href="/">安装说明</a>
@@ -75,11 +75,12 @@
         {% for j in jobs %}
         <tr>
           <td class="status-{{ j.status }}">{{ j.status }}{% if j.error %}<div class="err">{{ j.error }}</div>{% endif %}</td>
-          <td>{{ j.owner }}/{{ j.repo }} #{{ j.pr }}</td>
+          <td><a href="/console/jobs/{{ j.id }}">{{ j.owner }}/{{ j.repo }} #{{ j.pr }}</a></td>
           <td><code>{{ (j.sha or '')[:12] }}</code></td>
           <td><code>{{ (j.delivery_id or '')[:16] }}</code></td>
           <td class="muted">{{ j.created_at }}</td>
           <td>
+            <a class="btn" href="/console/jobs/{{ j.id }}" style="display:inline-block;text-decoration:none;margin-right:0.35rem">详情</a>
             <form method="post" action="/console/retry/{{ j.id }}" style="display:inline">
               <input type="hidden" name="admin_token" value="{{ admin_token or '' }}" />
               <button type="submit" {% if not admin_token %}disabled title="先填写 ADMIN_TOKEN"{% endif %}>重试</button>
@@ -90,7 +91,7 @@
       </tbody>
     </table>
     {% endif %}
-    <p class="muted"><a href="/console">刷新</a> · API：<code>GET /jobs</code>（需 Bearer / X-Admin-Token）</p>
+    <p class="muted"><a href="/console">刷新</a> · API：<code>GET /jobs</code> · <code>GET /jobs/{id}</code>（需 Bearer / X-Admin-Token）</p>
   </div>
 
   <div class="card">

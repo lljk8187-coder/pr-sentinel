@@ -140,7 +140,11 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
         report = analysis.markdown
         findings = analysis.findings
 
-        out: dict[str, Any] = {"_action": "analyzed", "report": report}
+        out: dict[str, Any] = {
+            "_action": "analyzed",
+            "report": report,
+            "findings": [f.to_dict() for f in findings],
+        }
 
         if config.get("check_run", True):
             out["check_run"] = publish_check_run(
@@ -201,10 +205,23 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
     settings = ctx.get("settings") or get_settings()
     job_try = int(ctx.get("job_try") or 1)
 
-    async def _status(status: str, error: str | None = None) -> None:
+    async def _status(
+        status: str,
+        error: str | None = None,
+        *,
+        findings=None,
+        report_md=None,
+        check_run_id=None,
+    ) -> None:
         try:
             await update_job_status_by_payload(
-                settings.database_url, job, status, error=error
+                settings.database_url,
+                job,
+                status,
+                error=error,
+                findings=findings,
+                report_md=report_md,
+                check_run_id=check_run_id,
             )
         except Exception:
             logger.exception("job status update failed status=%s", status)
@@ -212,7 +229,14 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
     await _status("running")
     try:
         result = process_job(job, settings)
-        await _status("success")
+        check_run = result.get("check_run") or {}
+        check_run_id = check_run.get("id") if isinstance(check_run, dict) else None
+        await _status(
+            "success",
+            findings=result.get("findings"),
+            report_md=result.get("report"),
+            check_run_id=check_run_id,
+        )
         return result
     except BusinessSkip as exc:
         logger.info("business skip: %s", exc.reason)

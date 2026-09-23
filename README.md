@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M8**：在 M7 CI 之上增加 **GitHub Check Run**（annotations）与高危 **inline review comments**。M7：GitHub Actions CI（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节 / additions / binary 扩展名启发（不调 Contents API）。
+GitHub PR 质量闸门 — **M9**：任务成功后 findings / report_md / check_run_id 写回 Postgres；`GET /jobs/{id}` 与控制台详情页。M8：GitHub Check Run（annotations）+ 高危 inline comments。M7：GitHub Actions CI（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节启发。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -18,10 +18,11 @@ GitHub / smee.io ──► apps/api (FastAPI)
                         ▼
                   apps/worker (arq)
                         │ 更新 PG job status/error/arq_job_id
+                        │ 成功时写回 findings / report_md / check_run_id
                         └─► Check Run (pr-sentinel) + sticky PR comment + high-severity inline comments
 
-浏览器 ──► / 安装说明 · /console 任务列表与重试
-         GET /jobs · POST /jobs/{id}/retry（ADMIN_TOKEN，读 PG）
+浏览器 ──► / 安装说明 · /console 任务列表 · /console/jobs/{id} 详情（报告 + findings）
+         GET /jobs · GET /jobs/{id} · POST /jobs/{id}/retry（ADMIN_TOKEN，读 PG）
 ```
 
 ## 目录
@@ -44,8 +45,10 @@ tests/
 | --- | --- |
 | http://localhost:8000/ | 安装 / 配置说明（App、smee、环境变量） |
 | http://localhost:8000/console | 最近任务列表 + 失败重试 |
+| http://localhost:8000/console/jobs/{id} | 任务详情（状态 / 报告 / findings） |
 | http://localhost:8000/health | 健康检查 |
 | `GET /jobs` | JSON 任务列表（需鉴权） |
+| `GET /jobs/{id}` | JSON 任务详情（含 findings / report_md / check_run_id） |
 | `POST /jobs/{id}/retry` | 按 job id 或 delivery_id 重放入队 |
 
 鉴权：环境变量 `ADMIN_TOKEN`；请求头 `Authorization: Bearer <token>` 或 `X-Admin-Token`。  
@@ -227,7 +230,7 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 
 - Workflow：`.github/workflows/ci.yml`（`push`/`pull_request` → `main`）。
 - Job `test`：Python 3.11 + Postgres 16 service；应用 `sql/001_jobs.sql` 后 `pytest -q`。
-- Redis 不作为 CI service（fakeredis）。（M8 已实现 Check Run + inline；不做 M9 / 真联调。）
+- Redis 不作为 CI service（fakeredis）。
 
 
 ## Phase2 M8：Check Run annotations + 高危 inline comments
@@ -238,6 +241,13 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **Inline comments**：仅对高危（high|critical|error）且有 path+line 的 findings；无 line 只进 Check Run/sticky，不臆造行号。
 - `summary_comment=false` 时跳过 sticky，但仍写 Check Run（除非 `check_run=false`）。
 - 默认：`check_run: true`、`inline_comments: true`。
+
+## Phase2 M9：Job detail + findings 写回
+
+- Worker 成功后把 `findings`（`Finding.to_dict()`）、`report_md`、`check_run_id` 写入 Postgres `jobs`（`update_job_status` / `update_job_result` / `update_job_status_by_payload` 可选字段；仅当非 `None` 时 SET）。
+- 失败（非 Retry）仍只写 `status` + `error`。
+- `GET /jobs/{id}`：与列表相同的 ADMIN_TOKEN 鉴权（未配置 503 / 错 token 403）；缺失 404；返回 findings / report_md / check_run_id 等，**不**默认 dump 完整 payload。
+- 控制台：列表行链接到 `/console/jobs/{id}`；详情页展示状态/错误、Markdown 报告、findings 表与重试；文案改为任务列表来自 **Postgres**。
 
 ## 测试
 

@@ -1,4 +1,4 @@
-"""Postgres-backed job archive for list / retry (M5; asyncpg, no ORM)."""
+"""Postgres-backed job archive for list / detail / retry (M5/M9; asyncpg, no ORM)."""
 
 from __future__ import annotations
 
@@ -33,6 +33,22 @@ def _public_view(record: dict[str, Any]) -> dict[str, Any]:
         out["error"] = record["error"]
     if record.get("arq_job_id"):
         out["arq_job_id"] = record["arq_job_id"]
+    return out
+
+
+def _detail_view(record: dict[str, Any]) -> dict[str, Any]:
+    """GET /jobs/{id} shape: list fields + findings / report_md / check_run_id / updated_at."""
+    out = _public_view(record)
+    findings = record.get("findings")
+    if findings is None:
+        findings = []
+    elif not isinstance(findings, list):
+        findings = []
+    out["findings"] = findings
+    out["report_md"] = record.get("report_md")
+    out["check_run_id"] = record.get("check_run_id")
+    if record.get("updated_at") is not None:
+        out["updated_at"] = record["updated_at"]
     return out
 
 
@@ -214,7 +230,11 @@ async def update_job_status(
     *,
     error: str | None = None,
     arq_job_id: str | None = None,
+    findings: list[Any] | None = None,
+    report_md: str | None = None,
+    check_run_id: int | None = None,
 ) -> bool:
+    """Update status/error/arq; optionally SET findings/report_md/check_run_id when not None."""
     try:
         jid = uuid.UUID(str(job_id))
     except ValueError:
@@ -222,7 +242,10 @@ async def update_job_status(
 
     conn = await _connect(database_url)
     try:
-        row = await conn.fetchrow("SELECT id, error, arq_job_id FROM jobs WHERE id = $1", jid)
+        row = await conn.fetchrow(
+            "SELECT id, error, arq_job_id, findings, report_md, check_run_id FROM jobs WHERE id = $1",
+            jid,
+        )
         if not row:
             return False
 
@@ -233,24 +256,64 @@ async def update_job_status(
             new_error = row["error"]
 
         new_arq = arq_job_id if arq_job_id is not None else row["arq_job_id"]
+        new_findings = findings if findings is not None else row["findings"]
+        new_report = report_md if report_md is not None else row["report_md"]
+        new_check = check_run_id if check_run_id is not None else row["check_run_id"]
+
+        if isinstance(new_findings, str):
+            try:
+                new_findings = json.loads(new_findings)
+            except json.JSONDecodeError:
+                new_findings = []
+
         await conn.execute(
             """
             UPDATE jobs
             SET status = $2,
                 error = $3,
                 arq_job_id = $4,
-                updated_at = $5
+                findings = $5::jsonb,
+                report_md = $6,
+                check_run_id = $7,
+                updated_at = $8
             WHERE id = $1
             """,
             jid,
             status,
             new_error,
             new_arq,
+            new_findings if new_findings is not None else [],
+            new_report,
+            new_check,
             _now(),
         )
         return True
     finally:
         await conn.close()
+
+
+async def update_job_result(
+    database_url: str,
+    job_id: str,
+    *,
+    status: str,
+    error: str | None = None,
+    findings: list[Any] | None = None,
+    report_md: str | None = None,
+    check_run_id: int | None = None,
+    arq_job_id: str | None = None,
+) -> bool:
+    """Convenience wrapper: write success/failure result fields into jobs."""
+    return await update_job_status(
+        database_url,
+        job_id,
+        status,
+        error=error,
+        arq_job_id=arq_job_id,
+        findings=findings,
+        report_md=report_md,
+        check_run_id=check_run_id,
+    )
 
 
 async def update_job_status_by_payload(
@@ -260,8 +323,18 @@ async def update_job_status_by_payload(
     *,
     error: str | None = None,
     arq_job_id: str | None = None,
+    findings: list[Any] | None = None,
+    report_md: str | None = None,
+    check_run_id: int | None = None,
 ) -> bool:
     """Best-effort status update using delivery_id or matching owner/repo/pr/sha."""
+    kwargs = dict(
+        error=error,
+        arq_job_id=arq_job_id,
+        findings=findings,
+        report_md=report_md,
+        check_run_id=check_run_id,
+    )
     delivery_id = payload.get("delivery_id")
     if delivery_id:
         job = await resolve_job(database_url, str(delivery_id))
@@ -270,8 +343,7 @@ async def update_job_status_by_payload(
                 database_url,
                 job["id"],
                 status,
-                error=error,
-                arq_job_id=arq_job_id,
+                **kwargs,
             )
 
     conn = await _connect(database_url)
@@ -294,8 +366,7 @@ async def update_job_status_by_payload(
             database_url,
             str(row["id"]),
             status,
-            error=error,
-            arq_job_id=arq_job_id,
+            **kwargs,
         )
     finally:
         await conn.close()

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>任务详情 · PR Sentinel</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #1a1a1a; }
+    body { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; background: #f6f7f9; }
+    h1, h2 { margin-top: 1.5rem; }
+    nav a { margin-right: 1rem; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { border-bottom: 1px solid #eee; padding: 0.45rem 0.35rem; text-align: left; vertical-align: top; }
+    th { background: #f0f2f5; }
+    .status-queued { color: #666; }
+    .status-running { color: #0b5fff; }
+    .status-success { color: #0a7a2f; }
+    .status-failed { color: #b00020; font-weight: 600; }
+    code, pre { background: #f0f2f5; border-radius: 4px; }
+    code { padding: 0.1rem 0.3rem; font-size: 0.85em; }
+    pre { padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; }
+    .err { color: #b00020; font-size: 0.85em; }
+    .muted { color: #666; font-size: 0.85rem; }
+    .meta { display: grid; grid-template-columns: 8rem 1fr; gap: 0.35rem 0.75rem; font-size: 0.9rem; }
+    .meta dt { color: #666; }
+    .meta dd { margin: 0; }
+    button, .btn { padding: 0.35rem 0.75rem; cursor: pointer; background: #1a1a1a; color: #fff; border: none; border-radius: 4px; text-decoration: none; display: inline-block; }
+    button:disabled { opacity: 0.5; }
+    .flash { padding: 0.6rem 0.8rem; border-radius: 6px; margin: 0.75rem 0; }
+    .flash-ok { background: #e6f6ea; border: 1px solid #8fd19e; }
+    .flash-err { background: #fde8ea; border: 1px solid #f0a0a8; }
+    .sev-error, .sev-high, .sev-critical { color: #b00020; font-weight: 600; }
+    .sev-warning, .sev-medium { color: #a65d00; }
+    .sev-info, .sev-low { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>任务详情</h1>
+  <p class="muted">M9 · findings / report 来自 Postgres · 重试需 <code>ADMIN_TOKEN</code></p>
+  <nav>
+    <a href="/console">← 返回控制台</a>
+    <a href="/">安装说明</a>
+    <a href="/health">/health</a>
+    <a href="/docs">OpenAPI</a>
+  </nav>
+
+  {% if flash %}
+  <div class="flash flash-{{ flash.kind }}">{{ flash.message }}</div>
+  {% endif %}
+
+  {% if not job %}
+  <div class="card">
+    <p class="err">未找到任务 <code>{{ job_id }}</code>。</p>
+    <p class="muted"><a href="/console">返回任务列表</a></p>
+  </div>
+  {% else %}
+  <div class="card">
+    <h2>概览</h2>
+    <dl class="meta">
+      <dt>状态</dt>
+      <dd class="status-{{ job.status }}">{{ job.status }}</dd>
+      <dt>仓库 / PR</dt>
+      <dd>{{ job.owner }}/{{ job.repo }} #{{ job.pr }}</dd>
+      <dt>SHA</dt>
+      <dd><code>{{ job.sha or '' }}</code></dd>
+      <dt>Job ID</dt>
+      <dd><code>{{ job.id }}</code></dd>
+      <dt>delivery</dt>
+      <dd><code>{{ job.delivery_id or '—' }}</code></dd>
+      <dt>check_run_id</dt>
+      <dd><code>{{ job.check_run_id if job.check_run_id is not none else '—' }}</code></dd>
+      <dt>arq_job_id</dt>
+      <dd><code>{{ job.arq_job_id or '—' }}</code></dd>
+      <dt>创建</dt>
+      <dd class="muted">{{ job.created_at }}</dd>
+      <dt>更新</dt>
+      <dd class="muted">{{ job.updated_at or '—' }}</dd>
+    </dl>
+    {% if job.error %}
+    <p class="err">错误：{{ job.error }}</p>
+    {% endif %}
+    <form method="post" action="/console/retry/{{ job.id }}" style="margin-top:0.75rem">
+      <input type="hidden" name="admin_token" value="{{ admin_token or '' }}" />
+      <input type="hidden" name="redirect_to" value="/console/jobs/{{ job.id }}" />
+      <button type="submit" {% if not admin_token %}disabled title="先在控制台填写 ADMIN_TOKEN"{% endif %}>重试入队</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>报告（Markdown）</h2>
+    {% if job.report_md %}
+    <pre>{{ job.report_md }}</pre>
+    {% else %}
+    <p class="muted">暂无报告（任务尚未成功完成或未写回）。</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Findings{% if job.findings %}（{{ job.findings|length }}）{% endif %}</h2>
+    {% if not job.findings %}
+    <p class="muted">暂无 findings。</p>
+    {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>严重度</th>
+          <th>标题 / 消息</th>
+          <th>路径</th>
+          <th>行</th>
+          <th>详情</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in job.findings %}
+        <tr>
+          <td class="sev-{{ f.severity or '' }}">{{ f.severity or '—' }}</td>
+          <td>{{ f.title or f.message or '—' }}</td>
+          <td><code>{{ f.path or f.filename or '—' }}</code></td>
+          <td>{{ f.line if f.line is not none else '—' }}</td>
+          <td class="muted">{{ f.detail or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endif %}
+</body>
+</html>
