@@ -153,11 +153,10 @@ cp .env.example .env
 ```bash
 docker compose -f deploy/docker-compose.yml --env-file .env up --build
 curl http://localhost:8000/health
-# 控制台
 open http://localhost:8000/console
 ```
 
-服务：`api`（:8000，含控制台）+ `worker`（arq）+ `redis`（队列/去重）+ `postgres`（**M5 jobs 存档**，挂载 `sql/` → initdb）。
+服务：`api`（:8000，含控制台）+ `worker`（arq）+ `redis`（队列/去重）+ `postgres`（**M5 jobs 存档**，挂载 `sql/` → initdb）。`api`/`worker` 设 `restart: unless-stopped`；worker 用进程级 healthcheck（查 PID1 为 `apps/worker/main.py` / arq，无 HTTP）。必填环境变量见 [`.env.example`](./.env.example)。
 
 端到端演示：[docs/e2e-demo.md](./docs/e2e-demo.md)。
 
