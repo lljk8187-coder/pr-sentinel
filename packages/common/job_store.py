@@ -36,8 +36,19 @@ def _public_view(record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _detail_view(record: dict[str, Any]) -> dict[str, Any]:
-    """GET /jobs/{id} shape: list fields + findings / report_md / check_run_id / updated_at."""
+def build_check_run_url(
+    owner: str | None,
+    repo: str | None,
+    check_run_id: int | str | None,
+) -> str | None:
+    """UI URL for a Check Run (``/runs/{id}``, not the API ``/check-runs/`` path)."""
+    if not owner or not repo or check_run_id is None or check_run_id == "":
+        return None
+    return f"https://github.com/{owner}/{repo}/runs/{check_run_id}"
+
+
+def job_to_detail_dict(record: dict[str, Any]) -> dict[str, Any]:
+    """GET /jobs/{id} + console detail: list fields + findings / report / check_run_url."""
     out = _public_view(record)
     findings = record.get("findings")
     if findings is None:
@@ -47,9 +58,27 @@ def _detail_view(record: dict[str, Any]) -> dict[str, Any]:
     out["findings"] = findings
     out["report_md"] = record.get("report_md")
     out["check_run_id"] = record.get("check_run_id")
+    out["check_run_url"] = build_check_run_url(
+        record.get("owner"),
+        record.get("repo"),
+        record.get("check_run_id"),
+    )
     if record.get("updated_at") is not None:
         out["updated_at"] = record["updated_at"]
     return out
+
+
+# Back-compat alias (API previously imported ``_detail_view``)
+_detail_view = job_to_detail_dict
+
+
+def aggregate_status_counts(jobs: list[dict[str, Any]]) -> dict[str, int]:
+    """Count jobs by ``status`` (for console metrics strip)."""
+    counts: dict[str, int] = {}
+    for job in jobs:
+        status = str(job.get("status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
 
 
 def _iso(value: Any) -> Any:

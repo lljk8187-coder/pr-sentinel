@@ -68,8 +68,17 @@
       <dd><code>{{ job.id }}</code></dd>
       <dt>delivery</dt>
       <dd><code>{{ job.delivery_id or '—' }}</code></dd>
-      <dt>check_run_id</dt>
-      <dd><code>{{ job.check_run_id if job.check_run_id is not none else '—' }}</code></dd>
+      <dt>check_run</dt>
+      <dd>
+        {% if job.check_run_url %}
+        <a href="{{ job.check_run_url }}" target="_blank" rel="noopener noreferrer"><code>{{ job.check_run_id }}</code></a>
+        <span class="muted"> · <a href="{{ job.check_run_url }}" target="_blank" rel="noopener noreferrer">打开 Check Run</a></span>
+        {% elif job.check_run_id is not none %}
+        <code>{{ job.check_run_id }}</code>
+        {% else %}
+        —
+        {% endif %}
+      </dd>
       <dt>arq_job_id</dt>
       <dd><code>{{ job.arq_job_id or '—' }}</code></dd>
       <dt>创建</dt>

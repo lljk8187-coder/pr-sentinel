@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **Phase3 M12**：手写 `validate_config`（非法 yml 回退默认值 + notes，不杀 job）+ 落库前 `privacy.redact_secrets` 脱敏 findings/report。M11：inline RIGHT 行号 + fingerprint upsert。Phase2（M9 / 0.9.0）：findings 写回 Postgres。M8：Check Run。M7：CI。M6：`ignore_paths`。
+GitHub PR 质量闸门 — **Phase3 M13**（ops 收尾）：`check_run_url`（`/runs/{id}` UI 链接）、结构化日志字段、控制台按 status 计数与轻量 `GET /metrics`。M12：`validate_config` + 落库脱敏。M11：inline RIGHT + fingerprint。Phase2（M9）：findings 写回 Postgres。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -48,7 +48,8 @@ tests/
 | http://localhost:8000/console/jobs/{id} | 任务详情（状态 / 报告 / findings） |
 | http://localhost:8000/health | 健康检查 |
 | `GET /jobs` | JSON 任务列表（需鉴权） |
-| `GET /jobs/{id}` | JSON 任务详情（含 findings / report_md / check_run_id） |
+| `GET /jobs/{id}` | JSON 任务详情（含 findings / report_md / check_run_id / **check_run_url**） |
+| `GET /metrics` | 进程内计数 JSON（webhook accepted/duplicate、worker success/fail；需 ADMIN_TOKEN，同 `/jobs`） |
 | `POST /jobs/{id}/retry` | 按 job id 或 delivery_id 重放入队 |
 
 鉴权：环境变量 `ADMIN_TOKEN`；请求头 `Authorization: Bearer <token>` 或 `X-Admin-Token`。  
@@ -256,6 +257,12 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - 失败（非 Retry）仍只写 `status` + `error`。
 - `GET /jobs/{id}`：与列表相同的 ADMIN_TOKEN 鉴权（未配置 503 / 错 token 403）；缺失 404；返回 findings / report_md / check_run_id 等，**不**默认 dump 完整 payload。
 - 控制台：列表行链接到 `/console/jobs/{id}`；详情页展示状态/错误、Markdown 报告、findings 表与重试；文案改为任务列表来自 **Postgres**。
+
+## Phase3 M13：ops 收尾
+
+- **check_run_url**：由 `owner`/`repo`/`check_run_id` 计算为 `https://github.com/{owner}/{repo}/runs/{id}`（UI 路径，**不是** API 的 `/check-runs/`）；`GET /jobs/{id}` 与控制台详情共用 `job_to_detail_dict`，不落库 html_url。
+- **结构化日志**：webhook 入队/去重与 worker `process_pr` 状态转换日志带可检索字段 `delivery_id` / `job_id` / `sha`（短 12 位）。
+- **指标**：`/console` 按当前列表任务的 `status` 聚合计数；可选 `GET /metrics` 返回进程内计数（无 prometheus）。
 
 ## 测试
 

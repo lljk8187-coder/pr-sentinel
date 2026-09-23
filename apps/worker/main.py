@@ -18,6 +18,8 @@ from arq import Retry  # noqa: E402
 
 from common.config import CONFIG_FILENAME, load_repo_config  # noqa: E402
 from common.job_store import update_job_status_by_payload  # noqa: E402
+from common import logutil  # noqa: E402
+from common import metrics as metrics_mod  # noqa: E402
 from common.queue import redis_settings_from_url  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 from pr_sentinel_github.analyzer import get_analyzer  # noqa: E402
@@ -218,6 +220,9 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
     """
     settings = ctx.get("settings") or get_settings()
     job_try = int(ctx.get("job_try") or 1)
+    delivery_id = job.get("delivery_id")
+    sha = job.get("head_sha")
+    store_job_id = job.get("store_job_id") or job.get("id")
 
     async def _status(
         status: str,
@@ -240,6 +245,13 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
         except Exception:
             logger.exception("job status update failed status=%s", status)
 
+    logutil.info(
+        logger,
+        "process_pr status=running",
+        delivery_id=delivery_id,
+        job_id=store_job_id,
+        sha=sha,
+    )
     await _status("running")
     try:
         result = process_job(job, settings)
@@ -251,23 +263,50 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
             report_md=result.get("report"),
             check_run_id=check_run_id,
         )
+        metrics_mod.incr("worker_success")
+        logutil.info(
+            logger,
+            "process_pr status=success",
+            delivery_id=delivery_id,
+            job_id=store_job_id,
+            sha=sha,
+        )
         return result
     except BusinessSkip as exc:
-        logger.info("business skip: %s", exc.reason)
+        logutil.info(
+            logger,
+            f"process_pr business skip: {exc.reason}",
+            delivery_id=delivery_id,
+            job_id=store_job_id,
+            sha=sha,
+        )
         await _status("success", error=f"skipped:{exc.reason}")
+        metrics_mod.incr("worker_success")
         return exc.payload
     except Exception as exc:
         if _is_transient_http(exc):
             # Exponential-ish backoff: 5, 10, 20… capped at 60s
             defer = min(60, 5 * (2 ** max(0, job_try - 1)))
-            logger.warning(
-                "transient error try=%s defer=%ss: %s", job_try, defer, exc
+            logutil.warning(
+                logger,
+                f"transient error try={job_try} defer={defer}s: {exc}",
+                delivery_id=delivery_id,
+                job_id=store_job_id,
+                sha=sha,
             )
             raise Retry(defer=defer) from exc
         # Non-transient (e.g. 4xx GitHub, programming errors): fail the job
         # without Retry so arq won't keep spinning on clear business failures.
         logger.exception("non-retryable error in process_pr: %s", exc)
         await _status("failed", error=str(exc)[:500])
+        metrics_mod.incr("worker_fail")
+        logutil.warning(
+            logger,
+            "process_pr status=failed",
+            delivery_id=delivery_id,
+            job_id=store_job_id,
+            sha=sha,
+        )
         raise
 
 

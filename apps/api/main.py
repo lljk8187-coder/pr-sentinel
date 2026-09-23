@@ -22,12 +22,15 @@ for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
         sys.path.insert(0, sp)
 
 from common.job_store import (  # noqa: E402
-    _detail_view,
+    aggregate_status_counts,
     get_job,
+    job_to_detail_dict,
     list_jobs,
     record_job,
     resolve_job,
 )
+from common import logutil  # noqa: E402
+from common import metrics as metrics_mod  # noqa: E402
 from common.queue import claim_delivery, create_arq_pool, enqueue_process_pr  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 
@@ -61,7 +64,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="pr-sentinel",
     version="0.9.0",
-    description="M9 quality-gate webhook API + console job detail (jobs in Postgres)",
+    description="M13 ops wrap-up: check_run_url, structured logs, console status counts /metrics",
     lifespan=lifespan,
 )
 
@@ -185,6 +188,17 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "pr-sentinel-api"}
 
 
+@app.get("/metrics")
+async def get_metrics(
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> dict[str, Any]:
+    """In-process counters (JSON). Same ADMIN_TOKEN pattern as /jobs."""
+    settings = get_settings()
+    require_admin(settings, authorization=authorization, x_admin_token=x_admin_token)
+    return {"counters": metrics_mod.snapshot()}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def install_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "install.html", {})
@@ -204,10 +218,16 @@ async def console_page(request: Request) -> HTMLResponse:
         flash = {"kind": "ok", "message": request.query_params.get("ok")}
     if request.query_params.get("err"):
         flash = {"kind": "err", "message": request.query_params.get("err")}
+    status_counts = aggregate_status_counts(jobs)
     return templates.TemplateResponse(
         request,
         "console.html",
-        {"jobs": jobs, "admin_token": admin_token, "flash": flash},
+        {
+            "jobs": jobs,
+            "admin_token": admin_token,
+            "flash": flash,
+            "status_counts": status_counts,
+        },
     )
 
 
@@ -262,7 +282,7 @@ async def console_job_detail(request: Request, job_id: str) -> HTMLResponse:
     try:
         record = await get_job(settings.database_url, job_id)
         if record:
-            job = _detail_view(record)
+            job = job_to_detail_dict(record)
     except Exception:
         logger.exception("get_job for console detail failed")
     admin_token = request.cookies.get("pr_sentinel_admin_token") or ""
@@ -301,7 +321,7 @@ async def get_job_detail(
     record = await get_job(settings.database_url, job_id)
     if not record:
         raise HTTPException(status_code=404, detail="job not found")
-    return _detail_view(record)
+    return job_to_detail_dict(record)
 
 
 @app.post("/jobs/{job_id}/retry")
@@ -359,7 +379,13 @@ async def github_webhook(
         ttl=settings.delivery_dedup_ttl,
     )
     if not claimed:
-        logger.info("duplicate delivery=%s — ack without re-enqueue", x_github_delivery)
+        metrics_mod.incr("webhook_duplicate")
+        logutil.info(
+            logger,
+            "duplicate delivery — ack without re-enqueue",
+            delivery_id=x_github_delivery,
+            sha=(job.get("head_sha") or ""),
+        )
         return JSONResponse(
             status_code=200,
             content={"status": "duplicate", "delivery": x_github_delivery},
@@ -384,14 +410,13 @@ async def github_webhook(
     except Exception:
         logger.exception("record_job failed (enqueue already accepted)")
 
-    logger.info(
-        "accepted PR %s#%s sha=%s delivery=%s arq=%s store=%s",
-        job["full_name"],
-        job["pr_number"],
-        (job.get("head_sha") or "")[:12],
-        x_github_delivery,
-        job_id,
-        store_id,
+    metrics_mod.incr("webhook_accepted")
+    logutil.info(
+        logger,
+        f"accepted PR {job['full_name']}#{job['pr_number']} arq={job_id}",
+        delivery_id=x_github_delivery,
+        job_id=store_id,
+        sha=job.get("head_sha"),
     )
     return JSONResponse(
         status_code=202,

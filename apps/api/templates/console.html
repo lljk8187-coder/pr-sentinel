@@ -56,6 +56,20 @@
   </div>
 
   <div class="card">
+    <h2>状态概览</h2>
+    {% if status_counts %}
+    <p>
+      {% for status, n in status_counts.items() %}
+      <span class="status-{{ status }}" style="margin-right:1rem"><strong>{{ status }}</strong>: {{ n }}</span>
+      {% endfor %}
+    </p>
+    <p class="muted">按当前列表任务聚合 · 进程内计数见 <code>GET /metrics</code>（需 ADMIN_TOKEN）</p>
+    {% else %}
+    <p class="muted">暂无状态统计。</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
     <h2>最近任务</h2>
     {% if not jobs %}
     <p class="muted">暂无任务。Webhook 成功入队后会出现在这里。</p>
