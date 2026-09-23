@@ -33,6 +33,7 @@ from pr_sentinel_github.llm import (  # noqa: E402
     LLMTransientError,
     redact_findings_for_storage,
 )
+from pr_sentinel_github.rules.base import Finding  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +52,28 @@ class BusinessSkip(Exception):
         super().__init__(reason)
         self.reason = reason
         self.payload = payload or {"_action": "skipped", "reason": reason}
+
+
+def _findings_from_redacted_dicts(items: list[dict[str, Any]]) -> list[Finding]:
+    """Rebuild Finding objects from redact_findings_for_storage dicts for publish_*."""
+    out: list[Finding] = []
+    for d in items:
+        if not isinstance(d, dict):
+            continue
+        meta = d.get("meta")
+        out.append(
+            Finding(
+                rule_id=str(d.get("rule_id") or "finding"),
+                severity=str(d.get("severity") or "info"),
+                message=str(d.get("message") or ""),
+                filename=d.get("filename") or d.get("path"),
+                meta=dict(meta) if isinstance(meta, dict) else {},
+                source=str(d.get("source") or "rules"),
+                detail=str(d.get("detail") or ""),
+                line=d.get("line"),
+            )
+        )
+    return out
 
 
 def build_client(settings: Settings, installation_id: int | None = None) -> GitHubClient:
@@ -145,10 +168,20 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
         report = analysis.markdown
         findings = analysis.findings
 
+        # M14: redact before Check Run / sticky / inline publish AND storage.
+        # Same redacted findings+report feed outbound GitHub + Postgres writeback.
+        redacted_findings, redacted_report = redact_findings_for_storage(
+            [f.to_dict() for f in findings],
+            report,
+            config,
+        )
+        findings = _findings_from_redacted_dicts(redacted_findings)
+        report = redacted_report if redacted_report is not None else report
+
         out: dict[str, Any] = {
             "_action": "analyzed",
             "report": report,
-            "findings": [f.to_dict() for f in findings],
+            "findings": redacted_findings,
         }
 
         if config.get("check_run", True):
@@ -196,16 +229,6 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
                 findings=findings,
                 files=files,
             )
-
-        # M12: redact secrets before persistence / result["findings"] (GitHub
-        # publish above may still carry raw text — 落库路径必须脱敏).
-        redacted_findings, redacted_report = redact_findings_for_storage(
-            out.get("findings") or [],
-            out.get("report"),
-            config,
-        )
-        out["findings"] = redacted_findings
-        out["report"] = redacted_report
 
         return out
     finally:

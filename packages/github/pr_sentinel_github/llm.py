@@ -128,10 +128,10 @@ def redact_findings_for_storage(
     report_md: str | None,
     config: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Redact secret-like strings in findings + report before Postgres write.
+    """Redact secret-like strings in findings + report (M12 storage / M14 outbound).
 
-    Respects ``privacy.redact_secrets`` (default True). Operates on a deep copy
-    so callers can still publish raw findings to GitHub if desired.
+    Respects ``privacy.redact_secrets`` (default True). Operates on a deep copy.
+    Worker uses the same redacted result for GitHub publish and Postgres writeback.
     """
     privacy = config.get("privacy") or {}
     enabled = bool(privacy.get("redact_secrets", True))
