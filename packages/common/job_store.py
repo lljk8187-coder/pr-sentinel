@@ -1,4 +1,4 @@
-"""Redis-backed job archive for list / retry (M4 console)."""
+"""Postgres-backed job archive for list / retry (M5; asyncpg, no ORM)."""
 
 from __future__ import annotations
 
@@ -8,26 +8,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-import redis.asyncio as redis_async
+import asyncpg
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LIST_KEY = "pr-sentinel:jobs"
-DEFAULT_JOB_PREFIX = "pr-sentinel:job:"
-DEFAULT_BY_DELIVERY_PREFIX = "pr-sentinel:job:by-delivery:"
-DEFAULT_MAX_JOBS = 100
 
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _job_key(job_id: str, prefix: str = DEFAULT_JOB_PREFIX) -> str:
-    return f"{prefix}{job_id}"
-
-
-def _delivery_key(delivery_id: str, prefix: str = DEFAULT_BY_DELIVERY_PREFIX) -> str:
-    return f"{prefix}{delivery_id}"
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _public_view(record: dict[str, Any]) -> dict[str, Any]:
@@ -49,185 +36,266 @@ def _public_view(record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-async def _client(redis_url: str):
-    return redis_async.from_url(redis_url, decode_responses=True)
+def _iso(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _row_to_record(row: asyncpg.Record) -> dict[str, Any]:
+    data = dict(row)
+    # UUID → str for JSON-friendly API
+    if data.get("id") is not None:
+        data["id"] = str(data["id"])
+    data["created_at"] = _iso(data.get("created_at"))
+    data["updated_at"] = _iso(data.get("updated_at"))
+    payload = data.get("payload")
+    if isinstance(payload, str):
+        try:
+            data["payload"] = json.loads(payload)
+        except json.JSONDecodeError:
+            pass
+    findings = data.get("findings")
+    if isinstance(findings, str):
+        try:
+            data["findings"] = json.loads(findings)
+        except json.JSONDecodeError:
+            pass
+    return data
+
+
+async def _connect(database_url: str) -> asyncpg.Connection:
+    conn = await asyncpg.connect(database_url)
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+        format="text",
+    )
+    return conn
 
 
 async def record_job(
-    redis_url: str,
+    database_url: str,
     *,
     payload: dict[str, Any],
     status: str = "queued",
     job_id: str | None = None,
     arq_job_id: str | None = None,
     error: str | None = None,
-    list_key: str = DEFAULT_LIST_KEY,
-    job_prefix: str = DEFAULT_JOB_PREFIX,
-    by_delivery_prefix: str = DEFAULT_BY_DELIVERY_PREFIX,
-    max_jobs: int = DEFAULT_MAX_JOBS,
+    max_jobs: int | None = None,  # kept for call-site compat; PG uses LIMIT on list
 ) -> dict[str, Any]:
     """Persist job summary + full payload for later list/retry. Returns stored record."""
-    jid = job_id or str(uuid.uuid4())
+    del max_jobs  # unused (list_jobs applies LIMIT)
+    jid = uuid.UUID(job_id) if job_id else uuid.uuid4()
     delivery_id = payload.get("delivery_id")
-    record: dict[str, Any] = {
-        "id": jid,
-        "delivery_id": delivery_id,
-        "owner": payload.get("owner"),
-        "repo": payload.get("repo"),
-        "pr": payload.get("pr_number"),
-        "sha": payload.get("head_sha"),
-        "status": status,
-        "created_at": _now_iso(),
-        "error": error,
-        "arq_job_id": arq_job_id,
-        "payload": payload,
-    }
-    client = await _client(redis_url)
+    if delivery_id is not None:
+        delivery_id = str(delivery_id)
+    now = _now()
+    owner = payload.get("owner")
+    repo = payload.get("repo")
+    pr = payload.get("pr_number")
+    sha = payload.get("head_sha")
+
+    insert_sql = """
+        INSERT INTO jobs (
+            id, delivery_id, owner, repo, pr, sha, status, error, arq_job_id,
+            payload, findings, created_at, updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10::jsonb, '[]'::jsonb, $11, $12
+        )
+        RETURNING *
+    """
+
+    conn = await _connect(database_url)
     try:
-        await client.set(_job_key(jid, job_prefix), json.dumps(record, ensure_ascii=False))
-        await client.lpush(list_key, jid)
-        await client.ltrim(list_key, 0, max(0, max_jobs - 1))
-        if delivery_id:
-            await client.set(_delivery_key(str(delivery_id), by_delivery_prefix), jid)
-        return record
+        try:
+            row = await conn.fetchrow(
+                insert_sql,
+                jid,
+                delivery_id,
+                owner,
+                repo,
+                pr,
+                sha,
+                status,
+                error,
+                arq_job_id,
+                payload,
+                now,
+                now,
+            )
+        except asyncpg.UniqueViolationError:
+            # Retry / re-record with same delivery_id → keep UNIQUE, null delivery_id
+            logger.info(
+                "delivery_id=%s already archived; inserting job without delivery_id",
+                delivery_id,
+            )
+            row = await conn.fetchrow(
+                insert_sql,
+                jid,
+                None,
+                owner,
+                repo,
+                pr,
+                sha,
+                status,
+                error,
+                arq_job_id,
+                payload,
+                now,
+                now,
+            )
+        return _row_to_record(row)
     finally:
-        await client.aclose()
+        await conn.close()
 
 
-async def get_job(
-    redis_url: str,
-    job_id: str,
-    *,
-    job_prefix: str = DEFAULT_JOB_PREFIX,
-) -> dict[str, Any] | None:
-    client = await _client(redis_url)
+async def get_job(database_url: str, job_id: str) -> dict[str, Any] | None:
     try:
-        raw = await client.get(_job_key(job_id, job_prefix))
-        if not raw:
+        jid = uuid.UUID(str(job_id))
+    except ValueError:
+        return None
+    conn = await _connect(database_url)
+    try:
+        row = await conn.fetchrow("SELECT * FROM jobs WHERE id = $1", jid)
+        if not row:
             return None
-        return json.loads(raw)
+        return _row_to_record(row)
     finally:
-        await client.aclose()
+        await conn.close()
 
 
-async def resolve_job(
-    redis_url: str,
-    id_or_delivery: str,
-    *,
-    job_prefix: str = DEFAULT_JOB_PREFIX,
-    by_delivery_prefix: str = DEFAULT_BY_DELIVERY_PREFIX,
-) -> dict[str, Any] | None:
+async def resolve_job(database_url: str, id_or_delivery: str) -> dict[str, Any] | None:
     """Resolve by job id first, then by delivery_id."""
-    job = await get_job(redis_url, id_or_delivery, job_prefix=job_prefix)
+    job = await get_job(database_url, id_or_delivery)
     if job:
         return job
-    client = await _client(redis_url)
+    conn = await _connect(database_url)
     try:
-        mapped = await client.get(_delivery_key(id_or_delivery, by_delivery_prefix))
-        if not mapped:
+        row = await conn.fetchrow(
+            "SELECT * FROM jobs WHERE delivery_id = $1 ORDER BY created_at DESC LIMIT 1",
+            str(id_or_delivery),
+        )
+        if not row:
             return None
-        raw = await client.get(_job_key(mapped, job_prefix))
-        if not raw:
-            return None
-        return json.loads(raw)
+        return _row_to_record(row)
     finally:
-        await client.aclose()
+        await conn.close()
 
 
-async def list_jobs(
-    redis_url: str,
-    *,
-    limit: int = 50,
-    list_key: str = DEFAULT_LIST_KEY,
-    job_prefix: str = DEFAULT_JOB_PREFIX,
-) -> list[dict[str, Any]]:
-    client = await _client(redis_url)
+async def list_jobs(database_url: str, *, limit: int = 50) -> list[dict[str, Any]]:
+    conn = await _connect(database_url)
     try:
-        ids = await client.lrange(list_key, 0, max(0, limit - 1))
+        rows = await conn.fetch(
+            """
+            SELECT id, delivery_id, owner, repo, pr, sha, status, error,
+                   arq_job_id, created_at
+            FROM jobs
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            max(0, limit),
+        )
         out: list[dict[str, Any]] = []
-        for jid in ids:
-            raw = await client.get(_job_key(jid, job_prefix))
-            if not raw:
-                continue
-            try:
-                out.append(_public_view(json.loads(raw)))
-            except json.JSONDecodeError:
-                logger.warning("corrupt job record id=%s", jid)
+        for row in rows:
+            out.append(_public_view(_row_to_record(row)))
         return out
     finally:
-        await client.aclose()
+        await conn.close()
 
 
 async def update_job_status(
-    redis_url: str,
+    database_url: str,
     job_id: str,
     status: str,
     *,
     error: str | None = None,
-    job_prefix: str = DEFAULT_JOB_PREFIX,
+    arq_job_id: str | None = None,
 ) -> bool:
-    client = await _client(redis_url)
     try:
-        key = _job_key(job_id, job_prefix)
-        raw = await client.get(key)
-        if not raw:
-            # Also try matching by payload delivery / arq id inside list — caller should pass store id
+        jid = uuid.UUID(str(job_id))
+    except ValueError:
+        return False
+
+    conn = await _connect(database_url)
+    try:
+        row = await conn.fetchrow("SELECT id, error, arq_job_id FROM jobs WHERE id = $1", jid)
+        if not row:
             return False
-        record = json.loads(raw)
-        record["status"] = status
-        if error is not None:
-            record["error"] = error
-        elif status in ("queued", "running", "success"):
-            record["error"] = None
-        record["updated_at"] = _now_iso()
-        await client.set(key, json.dumps(record, ensure_ascii=False))
+
+        new_error = error
+        if error is None and status in ("queued", "running", "success"):
+            new_error = None
+        elif error is None:
+            new_error = row["error"]
+
+        new_arq = arq_job_id if arq_job_id is not None else row["arq_job_id"]
+        await conn.execute(
+            """
+            UPDATE jobs
+            SET status = $2,
+                error = $3,
+                arq_job_id = $4,
+                updated_at = $5
+            WHERE id = $1
+            """,
+            jid,
+            status,
+            new_error,
+            new_arq,
+            _now(),
+        )
         return True
     finally:
-        await client.aclose()
+        await conn.close()
 
 
 async def update_job_status_by_payload(
-    redis_url: str,
+    database_url: str,
     payload: dict[str, Any],
     status: str,
     *,
     error: str | None = None,
-    list_key: str = DEFAULT_LIST_KEY,
-    job_prefix: str = DEFAULT_JOB_PREFIX,
-    by_delivery_prefix: str = DEFAULT_BY_DELIVERY_PREFIX,
+    arq_job_id: str | None = None,
 ) -> bool:
-    """Best-effort status update using delivery_id or scanning recent jobs for matching sha/pr."""
+    """Best-effort status update using delivery_id or matching owner/repo/pr/sha."""
     delivery_id = payload.get("delivery_id")
     if delivery_id:
-        job = await resolve_job(
-            redis_url,
-            str(delivery_id),
-            job_prefix=job_prefix,
-            by_delivery_prefix=by_delivery_prefix,
-        )
+        job = await resolve_job(database_url, str(delivery_id))
         if job and job.get("id"):
             return await update_job_status(
-                redis_url, job["id"], status, error=error, job_prefix=job_prefix
+                database_url,
+                job["id"],
+                status,
+                error=error,
+                arq_job_id=arq_job_id,
             )
 
-    # Fallback: match newest list entry with same owner/repo/pr/sha
-    client = await _client(redis_url)
+    conn = await _connect(database_url)
     try:
-        ids = await client.lrange(list_key, 0, 49)
-        for jid in ids:
-            raw = await client.get(_job_key(jid, job_prefix))
-            if not raw:
-                continue
-            record = json.loads(raw)
-            if (
-                record.get("owner") == payload.get("owner")
-                and record.get("repo") == payload.get("repo")
-                and record.get("pr") == payload.get("pr_number")
-                and record.get("sha") == payload.get("head_sha")
-            ):
-                return await update_job_status(
-                    redis_url, jid, status, error=error, job_prefix=job_prefix
-                )
-        return False
+        row = await conn.fetchrow(
+            """
+            SELECT id FROM jobs
+            WHERE owner = $1 AND repo = $2 AND pr = $3 AND sha = $4
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            payload.get("owner"),
+            payload.get("repo"),
+            payload.get("pr_number"),
+            payload.get("head_sha"),
+        )
+        if not row:
+            return False
+        return await update_job_status(
+            database_url,
+            str(row["id"]),
+            status,
+            error=error,
+            arq_job_id=arq_job_id,
+        )
     finally:
-        await client.aclose()
+        await conn.close()

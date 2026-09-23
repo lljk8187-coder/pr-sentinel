@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     allow_insecure_webhooks: bool = False
 
     redis_url: str = "redis://localhost:6379/0"
+    # Phase2 M5: jobs archive (Postgres via asyncpg)
+    database_url: str = "postgresql://prsentinel:prsentinel@localhost:5432/prsentinel"
     # Delivery dedup key prefix + TTL (seconds)
     delivery_dedup_prefix: str = "pr-sentinel:delivery:"
     delivery_dedup_ttl: int = 86400 * 7  # 7 days

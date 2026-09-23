@@ -80,7 +80,7 @@ curl -s -X POST -H "X-Admin-Token: $ADMIN_TOKEN" \
 | 现象 | 排查 |
 | --- | --- |
 | 401 invalid signature | Secret 与 `GITHUB_WEBHOOK_SECRET` 不一致，或 body 被中间层改写 |
-| 控制台无任务 | 确认 webhook 到了 API、delivery 未重复；看 api 日志 `record_job` |
+| 控制台无任务 | 确认 webhook 到了 API、delivery 未重复；看 api 日志 `record_job`；确认 Postgres `jobs` 表有行 |
 | 重试 503 | 未设置 `ADMIN_TOKEN` |
 | 重试 403 | Token 错误；可用 `Authorization: Bearer` 或 `X-Admin-Token` |
 | 无 PR 评论 | Worker 日志、安装权限、`USE_FIXTURES`、installation_id |

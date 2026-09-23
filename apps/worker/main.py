@@ -174,7 +174,7 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
     async def _status(status: str, error: str | None = None) -> None:
         try:
             await update_job_status_by_payload(
-                settings.redis_url, job, status, error=error
+                settings.database_url, job, status, error=error
             )
         except Exception:
             logger.exception("job status update failed status=%s", status)
@@ -205,7 +205,7 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
 
 async def on_startup(ctx: dict[str, Any]) -> None:
     ctx["settings"] = get_settings()
-    logger.info("arq worker startup redis=%s", ctx["settings"].redis_url)
+    logger.info("arq worker startup redis=%s db=%s", ctx["settings"].redis_url, ctx["settings"].database_url)
 
 
 class WorkerSettings:

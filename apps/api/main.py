@@ -1,4 +1,4 @@
-"""FastAPI webhook receiver + M4 minimal console / jobs API."""
+"""FastAPI webhook receiver + M5 console / jobs API (Postgres job store)."""
 
 from __future__ import annotations
 
@@ -58,8 +58,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="pr-sentinel",
-    version="0.4.0",
-    description="M4 quality-gate webhook API + console",
+    version="0.5.0",
+    description="M5 quality-gate webhook API + console (jobs in Postgres)",
     lifespan=lifespan,
 )
 
@@ -141,7 +141,7 @@ async def _get_pool(settings: Settings):
 
 
 async def _retry_job(settings: Settings, id_or_delivery: str) -> dict[str, Any]:
-    record = await resolve_job(settings.redis_url, id_or_delivery)
+    record = await resolve_job(settings.database_url, id_or_delivery)
     if not record:
         raise HTTPException(status_code=404, detail="job not found")
     payload = record.get("payload")
@@ -152,7 +152,7 @@ async def _retry_job(settings: Settings, id_or_delivery: str) -> dict[str, Any]:
     arq_job_id = await enqueue_process_pr(pool, payload)
     try:
         new_record = await record_job(
-            settings.redis_url,
+            settings.database_url,
             payload=payload,
             status="queued",
             arq_job_id=arq_job_id,
@@ -193,7 +193,7 @@ async def console_page(request: Request) -> HTMLResponse:
     settings = get_settings()
     jobs: list[dict[str, Any]] = []
     try:
-        jobs = await list_jobs(settings.redis_url, limit=50)
+        jobs = await list_jobs(settings.database_url, limit=50)
     except Exception:
         logger.exception("list_jobs for console failed")
     admin_token = request.cookies.get("pr_sentinel_admin_token") or ""
@@ -251,7 +251,7 @@ async def get_jobs(
 ) -> dict[str, Any]:
     settings = get_settings()
     require_admin(settings, authorization=authorization, x_admin_token=x_admin_token)
-    jobs = await list_jobs(settings.redis_url, limit=min(max(limit, 1), 200))
+    jobs = await list_jobs(settings.database_url, limit=min(max(limit, 1), 200))
     return {"jobs": jobs, "count": len(jobs)}
 
 
@@ -325,7 +325,7 @@ async def github_webhook(
     store_id = None
     try:
         stored = await record_job(
-            settings.redis_url,
+            settings.database_url,
             payload=job,
             status="queued",
             arq_job_id=job_id,

@@ -1,27 +1,27 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M4**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队（Redis 存档）→ Worker 规则(+可选 LLM) → Sticky Comment + **最小 Web 控制台**（任务列表 / 失败重试）。
+GitHub PR 质量闸门 — **M5（Phase2）**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队 → **Jobs 存 Postgres** → Worker 规则(+可选 LLM) → Sticky Comment + **最小 Web 控制台**（任务列表 / 失败重试）。
 
-> 本阶段 **不做** 完整 SaaS 多租户。
+> 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
-## 架构（M4）
+## 架构（M5）
 
 ```
 GitHub / smee.io ──► apps/api (FastAPI)
                         │ HMAC-SHA256 (X-Hub-Signature-256)
                         │ Redis SET NX 去重 X-GitHub-Delivery
                         │ arq.enqueue_job("process_pr")
-                        │ record_job → Redis LIST/JSON（控制台 / 重试）
+                        │ record_job → Postgres jobs 表（控制台 / 重试）
                         ▼ 尽快 202
-                     Redis (arq + job store)
+                     Redis (arq + delivery dedup) · Postgres (jobs)
                         │
                         ▼
                   apps/worker (arq)
-                        │ 更新 job status: running / success / failed
+                        │ 更新 PG job status/error/arq_job_id
                         └─► sticky PR comment
 
 浏览器 ──► / 安装说明 · /console 任务列表与重试
-         GET /jobs · POST /jobs/{id}/retry（ADMIN_TOKEN）
+         GET /jobs · POST /jobs/{id}/retry（ADMIN_TOKEN，读 PG）
 ```
 
 ## 目录
@@ -30,8 +30,9 @@ GitHub / smee.io ──► apps/api (FastAPI)
 apps/api/                 FastAPI：webhook + /console + /jobs
 apps/api/templates/       中文控制台 / 安装页（Jinja2）
 apps/worker/              arq WorkerSettings + process_pr
-packages/common/          settings / queue / job_store / DEFAULT_CONFIG
+packages/common/          settings / queue / job_store(asyncpg) / DEFAULT_CONFIG
 packages/github/          GitHub 客户端 + 规则 + llm + sticky
+sql/001_jobs.sql          Postgres jobs 表（compose initdb）
 docs/e2e-demo.md          端到端演示
 deploy/docker-compose.yml
 tests/
@@ -149,25 +150,30 @@ curl http://localhost:8000/health
 open http://localhost:8000/console
 ```
 
-服务：`api`（:8000，含控制台）+ `worker`（arq）+ `redis` + `postgres`（空库占位）。
+服务：`api`（:8000，含控制台）+ `worker`（arq）+ `redis`（队列/去重）+ `postgres`（**M5 jobs 存档**，挂载 `sql/` → initdb）。
 
 端到端演示：[docs/e2e-demo.md](./docs/e2e-demo.md)。
 
 ### 本地分进程
 
 ```bash
-# 终端 1 — Redis
+# 终端 1 — Redis + Postgres（或只用 compose 起依赖）
 redis-server
+# docker run --rm -e POSTGRES_USER=prsentinel -e POSTGRES_PASSWORD=prsentinel \
+#   -e POSTGRES_DB=prsentinel -p 5432:5432 -v "$PWD/sql:/docker-entrypoint-initdb.d:ro" \
+#   postgres:16-alpine
 
 # 终端 2 — API
 export PYTHONPATH=.:packages:packages/github:apps/api
 export USE_FIXTURES=true
 export ADMIN_TOKEN=dev-admin
+export DATABASE_URL=postgresql://prsentinel:prsentinel@localhost:5432/prsentinel
 uvicorn main:app --app-dir apps/api --reload --port 8000
 
 # 终端 3 — arq Worker
 export PYTHONPATH=.:packages:packages/github:apps/worker
 export USE_FIXTURES=true
+export DATABASE_URL=postgresql://prsentinel:prsentinel@localhost:5432/prsentinel
 python apps/worker/main.py
 ```
 
@@ -199,7 +205,14 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 
 `WorkerSettings`：`max_tries=3`、`job_timeout=300`、瞬态错误 `Retry(defer=…)` 退避。业务 skip（如 `summary_comment=false`）正常返回，不耗尽重试。
 
-控制台 **失败重试**（M4）会重新 `enqueue process_pr`，payload 从 Redis 存档读取。
+控制台 **失败重试**（M4/M5）会重新 `enqueue process_pr`，payload 从 **Postgres jobs** 存档读取。
+
+## Phase2 M5：Jobs → Postgres
+
+- 表定义：[`sql/001_jobs.sql`](./sql/001_jobs.sql)（`id UUID`、`delivery_id UNIQUE`、`payload/findings JSONB` 等）。
+- `packages/common/job_store.py` 使用 **asyncpg**；`DATABASE_URL` 见 [`.env.example`](./.env.example)。
+- Redis **仅**保留 delivery 去重 + arq；**禁止**再写 `pr-sentinel:job:*`。
+- 不做多租户 / Alembic / ORM；不用 PG 替 arq。
 
 ## 测试
 
