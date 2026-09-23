@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M6**：在 M5（Webhook → arq → Jobs/Postgres → Sticky + 控制台）之上收紧规则启发式：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节 / additions / binary 扩展名启发（不调 Contents API）。
+GitHub PR 质量闸门 — **M7**：在 M6 规则收紧之上增加 **GitHub Actions CI**（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节 / additions / binary 扩展名启发（不调 Contents API）。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -221,12 +221,33 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **不做** Contents API 拉文件、不臆造真实文件 size；小文本不误报。
 - 依赖：`pathspec`（见 `requirements.txt` / `pyproject.toml`）。
 
+## Phase2 M7：GitHub Actions CI
+
+- Workflow：`.github/workflows/ci.yml`（`push`/`pull_request` → `main`）。
+- Job `test`：Python 3.11 + Postgres 16 service；应用 `sql/001_jobs.sql` 后 `pytest -q`。
+- Redis 不作为 CI service（fakeredis）。不做 M8/M9 / 真联调。
+
 ## 测试
+
+需要可达的 Postgres（与 `DATABASE_URL` 一致；默认 `postgresql://prsentinel:prsentinel@localhost:5432/prsentinel`）。
+Redis 用 **fakeredis**，本地/CI **不**依赖 Redis service。
 
 ```bash
 pip install -r requirements.txt
+# 可选：先应用 schema（conftest 也会 execute sql/001_jobs.sql）
+# psql "$DATABASE_URL" -f sql/001_jobs.sql
 pytest -q
 ```
+
+## CI（M7）
+
+[![CI](https://github.com/lljk8187-coder/pr-sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/lljk8187-coder/pr-sentinel/actions/workflows/ci.yml)
+
+Push / PR 到 `main` 时，[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) 在 `ubuntu-latest` + Python 3.11 上跑：
+
+- **Postgres 16** service（`prsentinel` / `prsentinel` / `prsentinel`，健康检查后注入 `DATABASE_URL`）
+- `pip install -r requirements.txt` → 用 asyncpg 应用 `sql/001_jobs.sql` → `pytest -q`
+- 不启 Redis service（测试侧 fakeredis）
 
 ## 许可
 

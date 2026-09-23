@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: prsentinel
+          POSTGRES_PASSWORD: prsentinel
+          POSTGRES_DB: prsentinel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prsentinel -d prsentinel"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://prsentinel:prsentinel@localhost:5432/prsentinel
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply jobs schema
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          from pathlib import Path
+
+          import asyncpg
+
+          async def main() -> None:
+              url = os.environ["DATABASE_URL"]
+              sql = Path("sql/001_jobs.sql").read_text(encoding="utf-8")
+              conn = await asyncpg.connect(url)
+              try:
+                  await conn.execute(sql)
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: Run pytest
+        run: pytest -q
