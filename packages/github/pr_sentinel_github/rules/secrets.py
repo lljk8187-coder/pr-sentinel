@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from .base import Finding
+from .patch_lines import patch_offset_to_new_line
 
 
 class SecretsRule:
@@ -29,17 +30,35 @@ class SecretsRule:
         for f in files:
             filename = f.get("filename") or ""
             patch = f.get("patch") or ""
-            haystack = f"{filename}\n{patch}"
             for rx in compiled:
-                for m in rx.finditer(haystack):
+                matched = False
+                # Prefer patch matches so we can attach a new-file line when possible.
+                for m in rx.finditer(patch):
+                    line = patch_offset_to_new_line(patch, m.start())
                     findings.append(
                         Finding(
                             rule_id=self.rule_id,
                             severity="error",
                             message=f"疑似密钥匹配 `{rx.pattern}`",
                             filename=filename,
+                            line=line,
                             meta={"match": m.group(0)[:80], "pattern": rx.pattern},
                         )
                     )
+                    matched = True
                     break  # one finding per pattern per file
+                if matched:
+                    continue
+                m = rx.search(filename)
+                if m:
+                    findings.append(
+                        Finding(
+                            rule_id=self.rule_id,
+                            severity="error",
+                            message=f"疑似密钥匹配 `{rx.pattern}`",
+                            filename=filename,
+                            line=None,
+                            meta={"match": m.group(0)[:80], "pattern": rx.pattern},
+                        )
+                    )
         return findings

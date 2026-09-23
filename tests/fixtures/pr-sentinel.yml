@@ -1,5 +1,7 @@
 version: 1
 summary_comment: true
+check_run: true
+inline_comments: true
 update_strategy: update
 ignore_paths:
   - "docs/**"

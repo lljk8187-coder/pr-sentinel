@@ -207,6 +207,15 @@ def _parse_llm_findings(content: str) -> list[Finding]:
         title = str(item.get("title") or item.get("message") or "LLM finding")
         detail = str(item.get("detail") or item.get("description") or "")
         path = item.get("path") or item.get("filename")
+        line_val: int | None = None
+        raw_line = item.get("line")
+        if raw_line is not None and raw_line != "":
+            try:
+                line_val = int(raw_line)
+            except (TypeError, ValueError):
+                line_val = None
+            if line_val is not None and line_val < 1:
+                line_val = None
         findings.append(
             Finding(
                 rule_id="llm",
@@ -217,8 +226,10 @@ def _parse_llm_findings(content: str) -> list[Finding]:
                 filename=str(path) if path else None,
                 source="llm",
                 detail=detail,
+                line=line_val,
                 meta={k: v for k, v in item.items() if k not in {
-                    "severity", "title", "message", "detail", "description", "path", "filename"
+                    "severity", "title", "message", "detail", "description",
+                    "path", "filename", "line",
                 }},
             )
         )

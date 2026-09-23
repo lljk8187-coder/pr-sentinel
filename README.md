@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M7**：在 M6 规则收紧之上增加 **GitHub Actions CI**（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节 / additions / binary 扩展名启发（不调 Contents API）。
+GitHub PR 质量闸门 — **M8**：在 M7 CI 之上增加 **GitHub Check Run**（annotations）与高危 **inline review comments**。M7：GitHub Actions CI（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节 / additions / binary 扩展名启发（不调 Contents API）。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -18,7 +18,7 @@ GitHub / smee.io ──► apps/api (FastAPI)
                         ▼
                   apps/worker (arq)
                         │ 更新 PG job status/error/arq_job_id
-                        └─► sticky PR comment
+                        └─► Check Run (pr-sentinel) + sticky PR comment + high-severity inline comments
 
 浏览器 ──► / 安装说明 · /console 任务列表与重试
          GET /jobs · POST /jobs/{id}/retry（ADMIN_TOKEN，读 PG）
@@ -66,6 +66,8 @@ tests/
 
 | 字段 | 说明 |
 | --- | --- |
+| `check_run` | 是否创建 GitHub Check Run `pr-sentinel`（默认 `true`）；无 error/high/critical → success，否则 failure |
+| `inline_comments` | 高危（error/high/critical）且有 path+line 时发 inline review comment（默认 `true`） |
 | `update_strategy` | `update`（默认 PATCH）/ `recreate`（删旧再 POST）/ `skip_if_exists` |
 | `ignore_paths` | gitignore 风格（**pathspec.GitIgnoreSpec**）：`**`、目录前缀、取反 `!`；匹配文件不进入规则扫描 |
 | `rules.secrets` | patch/文件名正则 |
@@ -225,7 +227,17 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 
 - Workflow：`.github/workflows/ci.yml`（`push`/`pull_request` → `main`）。
 - Job `test`：Python 3.11 + Postgres 16 service；应用 `sql/001_jobs.sql` 后 `pytest -q`。
-- Redis 不作为 CI service（fakeredis）。不做 M8/M9 / 真联调。
+- Redis 不作为 CI service（fakeredis）。（M8 已实现 Check Run + inline；不做 M9 / 真联调。）
+
+
+## Phase2 M8：Check Run annotations + 高危 inline comments
+
+- 分析完成后创建/更新名为 `pr-sentinel` 的 GitHub Check Run：`in_progress` → `completed`。
+- **Conclusion**：findings 中**没有** severity ∈ {error, high, critical} → `success`，否则 `failure`。
+- **Annotations**：带 path+line 的 findings 写入 Check Run `output.annotations`（每请求最多 50 条；超出截断并在 summary 中注明）。
+- **Inline comments**：仅对高危（high|critical|error）且有 path+line 的 findings；无 line 只进 Check Run/sticky，不臆造行号。
+- `summary_comment=false` 时跳过 sticky，但仍写 Check Run（除非 `check_run=false`）。
+- 默认：`check_run: true`、`inline_comments: true`。
 
 ## 测试
 

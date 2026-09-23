@@ -22,6 +22,10 @@ from common.queue import redis_settings_from_url  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 from pr_sentinel_github.analyzer import get_analyzer  # noqa: E402
 from pr_sentinel_github.client import GitHubClient  # noqa: E402
+from pr_sentinel_github.check_runs import (  # noqa: E402
+    publish_check_run,
+    publish_inline_comments,
+)
 from pr_sentinel_github.comments import upsert_pr_comment  # noqa: E402
 from pr_sentinel_github.llm import LLMTransientError  # noqa: E402
 
@@ -125,7 +129,7 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
 
         files = client.list_pr_files(owner, repo, pr_number)
         analyzer = get_analyzer(config)
-        report = analyzer.analyze(
+        analysis = analyzer.analyze(
             files,
             head_sha=head_sha,
             pr_number=pr_number,
@@ -133,31 +137,57 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
             config=config,
             config_notes=config_notes,
         )
+        report = analysis.markdown
+        findings = analysis.findings
 
-        if not config.get("summary_comment", True):
+        out: dict[str, Any] = {"_action": "analyzed", "report": report}
+
+        if config.get("check_run", True):
+            out["check_run"] = publish_check_run(
+                client,
+                owner=owner,
+                repo=repo,
+                head_sha=head_sha,
+                findings=findings,
+                report_body=report,
+            )
+
+        if config.get("summary_comment", True):
+            strategy = str(config.get("update_strategy") or "update")
+            sticky = upsert_pr_comment(
+                client,
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                report_body=report,
+                update_strategy=strategy,
+            )
+            out.update(sticky)
+            logger.info(
+                "done %s/%s#%s action=%s truncated=%s strategy=%s",
+                owner,
+                repo,
+                pr_number,
+                sticky.get("_action"),
+                client.truncated,
+                strategy,
+            )
+        else:
             logger.info("summary_comment=false — skipping sticky comment")
-            return {"_action": "skipped_comment", "report": report}
+            out["_action"] = "skipped_comment"
 
-        strategy = str(config.get("update_strategy") or "update")
-        result = upsert_pr_comment(
-            client,
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            head_sha=head_sha,
-            report_body=report,
-            update_strategy=strategy,
-        )
-        logger.info(
-            "done %s/%s#%s action=%s truncated=%s strategy=%s",
-            owner,
-            repo,
-            pr_number,
-            result.get("_action"),
-            client.truncated,
-            strategy,
-        )
-        return result
+        if config.get("inline_comments", True):
+            out["inline_comments"] = publish_inline_comments(
+                client,
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                findings=findings,
+            )
+
+        return out
     finally:
         client.close()
 

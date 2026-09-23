@@ -325,3 +325,156 @@ class GitHubClient:
         resp = self._ensure_http().delete(url, headers=self._auth_headers())
         self.calls.append({"method": "DELETE", "path": url, "status": resp.status_code})
         resp.raise_for_status()
+
+    def create_check_run(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        name: str,
+        head_sha: str,
+        status: str = "queued",
+        conclusion: str | None = None,
+        output: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """POST /repos/{owner}/{repo}/check-runs"""
+        path = f"/repos/{owner}/{repo}/check-runs"
+        payload: dict[str, Any] = {
+            "name": name,
+            "head_sha": head_sha,
+            "status": status,
+        }
+        if conclusion is not None:
+            payload["conclusion"] = conclusion
+        if output is not None:
+            payload["output"] = output
+
+        if self._should_use_fixtures:
+            result = {
+                "id": 8001,
+                "name": name,
+                "head_sha": head_sha,
+                "status": status,
+                "conclusion": conclusion,
+                "output": output,
+                "html_url": f"https://github.com/{owner}/{repo}/runs/8001",
+            }
+            self.calls.append(
+                {
+                    "method": "POST",
+                    "path": path,
+                    "payload": payload,
+                    "fixture": True,
+                    "result": result,
+                }
+            )
+            return result
+
+        url = f"{GITHUB_API}{path}"
+        resp = self._ensure_http().post(url, headers=self._auth_headers(), json=payload)
+        self.calls.append({"method": "POST", "path": url, "status": resp.status_code})
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_check_run(
+        self,
+        owner: str,
+        repo: str,
+        check_run_id: int,
+        *,
+        status: str | None = None,
+        conclusion: str | None = None,
+        output: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}"""
+        path = f"/repos/{owner}/{repo}/check-runs/{check_run_id}"
+        payload: dict[str, Any] = {}
+        if status is not None:
+            payload["status"] = status
+        if conclusion is not None:
+            payload["conclusion"] = conclusion
+        if output is not None:
+            payload["output"] = output
+
+        if self._should_use_fixtures:
+            result = {
+                "id": check_run_id,
+                "status": status,
+                "conclusion": conclusion,
+                "output": output,
+            }
+            self.calls.append(
+                {
+                    "method": "PATCH",
+                    "path": path,
+                    "payload": payload,
+                    "fixture": True,
+                    "result": result,
+                }
+            )
+            return result
+
+        url = f"{GITHUB_API}{path}"
+        resp = self._ensure_http().patch(url, headers=self._auth_headers(), json=payload)
+        self.calls.append({"method": "PATCH", "path": url, "status": resp.status_code})
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_pull_review_comment(
+        self,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        *,
+        body: str,
+        commit_id: str,
+        path: str,
+        line: int,
+        side: str = "RIGHT",
+    ) -> dict[str, Any]:
+        """POST /repos/{owner}/{repo}/pulls/{pr_number}/comments (inline review)."""
+        api_path = f"/repos/{owner}/{repo}/pulls/{pr_number}/comments"
+        payload: dict[str, Any] = {
+            "body": body,
+            "commit_id": commit_id,
+            "path": path,
+            "line": line,
+            "side": side,
+        }
+
+        if self._should_use_fixtures:
+            n = sum(
+                1
+                for c in self.calls
+                if c.get("method") == "POST"
+                and "/pulls/" in c.get("path", "")
+                and c.get("path", "").endswith("/comments")
+            )
+            cid = 7001 + n
+            result = {
+                "id": cid,
+                "body": body,
+                "path": path,
+                "line": line,
+                "commit_id": commit_id,
+                "side": side,
+                "html_url": f"https://github.com/{owner}/{repo}/pull/{pr_number}#discussion_r{cid}",
+            }
+            self.calls.append(
+                {
+                    "method": "POST",
+                    "path": api_path,
+                    "payload": payload,
+                    "body": body,
+                    "fixture": True,
+                    "result": result,
+                }
+            )
+            return result
+
+        url = f"{GITHUB_API}{api_path}"
+        resp = self._ensure_http().post(url, headers=self._auth_headers(), json=payload)
+        self.calls.append({"method": "POST", "path": url, "status": resp.status_code})
+        resp.raise_for_status()
+        return resp.json()
+

@@ -49,7 +49,7 @@ def test_llm_skipped_without_api_key(monkeypatch):
     cfg = get_default_config()
     cfg["analyzer"]["mode"] = "rules+llm"
 
-    report = RulesLLMAnalyzer().analyze(
+    analysis = RulesLLMAnalyzer().analyze(
         SAMPLE_FILES,
         head_sha="deadbeefcafebabe000011112222333344445555",
         pr_number=42,
@@ -57,6 +57,7 @@ def test_llm_skipped_without_api_key(monkeypatch):
         config=cfg,
         config_notes=[],
     )
+    report = analysis.markdown
     assert "llm_skipped" in report
     assert "Assumptions" in report or "assumptions" in report.lower()
     assert "LLM 发现" in report
@@ -108,7 +109,7 @@ def test_llm_success_with_httpx_mock(monkeypatch):
         }
     ]
 
-    report = RulesLLMAnalyzer().analyze(
+    analysis = RulesLLMAnalyzer().analyze(
         files,
         head_sha="deadbeefcafebabe000011112222333344445555",
         pr_number=42,
@@ -116,6 +117,7 @@ def test_llm_success_with_httpx_mock(monkeypatch):
         config=cfg,
         http_client=client,
     )
+    report = analysis.markdown
     assert "Missing error handling" in report
     assert "LLM 发现" in report
     assert "Limits 截断" in report

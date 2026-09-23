@@ -10,7 +10,7 @@ from typing import Any, Protocol
 class Finding:
     """Unified finding from rules engine or LLM.
 
-    Suggested shape: ``{source, severity, title, detail, path?}``.
+    Suggested shape: ``{source, severity, title, detail, path?, line?}``.
     ``message`` / ``filename`` / ``rule_id`` kept for M2 rule compatibility.
     """
 
@@ -21,6 +21,7 @@ class Finding:
     meta: dict[str, Any] = field(default_factory=dict)
     source: str = "rules"  # rules | llm
     detail: str = ""
+    line: int | None = None
 
     @property
     def title(self) -> str:

@@ -190,7 +190,7 @@ def test_engine_skips_ignored_for_secrets():
 
 
 def test_rules_analyzer_report_mentions_truncation():
-    report = RulesAnalyzer().analyze(
+    analysis = RulesAnalyzer().analyze(
         [],
         head_sha="deadbeefcafebabe000011112222333344445555",
         pr_number=1,
@@ -198,5 +198,6 @@ def test_rules_analyzer_report_mentions_truncation():
         config=get_default_config(),
         config_notes=["测试 note"],
     )
+    report = analysis.markdown
     assert "Limits 截断" in report
     assert "测试 note" in report

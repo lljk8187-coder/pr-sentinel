@@ -159,6 +159,8 @@ def test_default_config_constants():
     from common.defaults import DEFAULT_CONFIG, get_default_config
 
     assert DEFAULT_CONFIG["analyzer"]["mode"] == "rules+llm"
+    assert DEFAULT_CONFIG["check_run"] is True
+    assert DEFAULT_CONFIG["inline_comments"] is True
     assert DEFAULT_CONFIG["diff"]["max_files"] == 300
     assert DEFAULT_CONFIG["privacy"]["redact_secrets"] is True
     assert DEFAULT_CONFIG["llm"]["max_patch_chars"] == 12000

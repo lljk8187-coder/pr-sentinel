@@ -9,6 +9,8 @@ from typing import Any
 DEFAULT_CONFIG: dict[str, Any] = {
     "version": 1,
     "summary_comment": True,
+    "check_run": True,
+    "inline_comments": True,
     "update_strategy": "update",  # update | recreate | skip_if_exists
     "ignore_paths": [
         "docs/**",

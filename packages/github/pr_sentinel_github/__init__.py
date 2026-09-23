@@ -1,6 +1,7 @@
 """GitHub API client for pr-sentinel (App JWT / PAT / fixtures + rules + LLM)."""
 
 from .analyzer import (
+    AnalysisResult,
     FakeAnalyzer,
     RulesAnalyzer,
     RulesLLMAnalyzer,
@@ -12,6 +13,7 @@ from .comments import summary_marker, upsert_pr_comment
 
 __all__ = [
     "GitHubClient",
+    "AnalysisResult",
     "FakeAnalyzer",
     "RulesAnalyzer",
     "RulesLLMAnalyzer",

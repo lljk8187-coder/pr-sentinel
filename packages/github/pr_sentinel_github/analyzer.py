@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from .llm import LLMReviewResult, max_severity, review_with_llm
 from .rules import Finding, RulesEngine
+
+
+@dataclass
+class AnalysisResult:
+    """Structured analyzer output for the worker (markdown + findings)."""
+
+    markdown: str
+    findings: list[Finding]
+    overall_severity: str
 
 
 def build_report(
@@ -205,14 +215,15 @@ class FakeAnalyzer:
         config: dict[str, Any] | None = None,
         config_notes: list[str] | None = None,
         http_client: httpx.Client | None = None,
-    ) -> str:
-        return build_report(
+    ) -> AnalysisResult:
+        md = build_report(
             files,
             head_sha=head_sha,
             pr_number=pr_number,
             truncated=truncated,
             config=config,
         )
+        return AnalysisResult(markdown=md, findings=[], overall_severity="info")
 
 
 class RulesAnalyzer:
@@ -229,10 +240,10 @@ class RulesAnalyzer:
         config: dict[str, Any] | None = None,
         config_notes: list[str] | None = None,
         http_client: httpx.Client | None = None,
-    ) -> str:
+    ) -> AnalysisResult:
         cfg = config or {}
         findings, kept, ignored = self.engine.run(files, cfg)
-        return build_rules_report(
+        md = build_rules_report(
             kept,
             head_sha=head_sha,
             pr_number=pr_number,
@@ -243,6 +254,8 @@ class RulesAnalyzer:
             config_notes=config_notes,
             llm_result=None,
         )
+        overall = max_severity(findings, default="info")
+        return AnalysisResult(markdown=md, findings=list(findings), overall_severity=overall)
 
 
 class RulesLLMAnalyzer:
@@ -261,7 +274,7 @@ class RulesLLMAnalyzer:
         config: dict[str, Any] | None = None,
         config_notes: list[str] | None = None,
         http_client: httpx.Client | None = None,
-    ) -> str:
+    ) -> AnalysisResult:
         cfg = config or {}
         findings, kept, ignored = self.engine.run(files, cfg)
         llm_result = review_with_llm(
@@ -273,7 +286,7 @@ class RulesLLMAnalyzer:
             http_client=http_client,
         )
         merged = list(findings) + list(llm_result.findings)
-        return build_rules_report(
+        md = build_rules_report(
             kept,
             head_sha=head_sha,
             pr_number=pr_number,
@@ -284,6 +297,8 @@ class RulesLLMAnalyzer:
             config_notes=config_notes,
             llm_result=llm_result,
         )
+        overall = max_severity(merged, default="info")
+        return AnalysisResult(markdown=md, findings=merged, overall_severity=overall)
 
 
 def get_analyzer(
