@@ -238,7 +238,10 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
 async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
     """arq function name must match enqueue_job('process_pr', …).
 
-    Transient network/5xx/timeout → ``Retry`` with backoff (up to max_tries).
+    Transient network/5xx/429/timeout → ``Retry`` with backoff while
+    ``job_try < max_tries``; on the last try write ``failed``
+    (``transient exhausted:…``) and return normally so PG is not stuck
+    at ``running``. Non-transient errors fail immediately (no Retry).
     Business skips return normally (no infinite retry).
     """
     settings = ctx.get("settings") or get_settings()
@@ -308,6 +311,7 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
         return exc.payload
     except Exception as exc:
         if _is_transient_http(exc):
+            max_tries = int(getattr(WorkerSettings, "max_tries", 3) or 3)
             # Exponential-ish backoff: 5, 10, 20… capped at 60s
             defer = min(60, 5 * (2 ** max(0, job_try - 1)))
             logutil.warning(
@@ -317,6 +321,23 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
                 job_id=store_job_id,
                 sha=sha,
             )
+            if job_try >= max_tries:
+                # Last try: mark failed and return normally so PG is not stuck
+                # at running. Do NOT raise Retry (arq would re-enqueue then
+                # reject at job_try > max_tries without calling us again).
+                err = f"transient exhausted: {exc}"[:500]
+                await _status("failed", error=err)
+                metrics_mod.incr("worker_fail")
+                logutil.warning(
+                    logger,
+                    "process_pr status=failed",
+                    delivery_id=delivery_id,
+                    job_id=store_job_id,
+                    sha=sha,
+                )
+                return {"_action": "failed", "error": err}
+            # Middle tries: surface retry hint, then arq Retry (no enqueue_job).
+            await _status("running", error=f"retrying try={job_try}")
             raise Retry(defer=defer) from exc
         # Non-transient (e.g. 4xx GitHub, programming errors): fail the job
         # without Retry so arq won't keep spinning on clear business failures.
