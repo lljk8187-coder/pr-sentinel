@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1001,
+    "body": "<!-- pr-sentinel:deadbeefcafebabe000011112222333344445555 -->\n## old report\n",
+    "user": {"login": "pr-sentinel[bot]"},
+    "html_url": "https://github.com/acme/demo/pull/7#issuecomment-1001"
+  },
+  {
+    "id": 1002,
+    "body": "unrelated human comment",
+    "user": {"login": "alice"}
+  }
+]
