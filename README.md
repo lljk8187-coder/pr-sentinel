@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **Phase3 M11**：高危 inline review comments 按新文件 RIGHT 行号 + fingerprint upsert（同步不重复 POST）。Phase2（M9 / 0.9.0）：findings / report_md / check_run_id 写回 Postgres；`GET /jobs/{id}`。M8：Check Run annotations。M7：CI。M6：`ignore_paths` pathspec。
+GitHub PR 质量闸门 — **Phase3 M12**：手写 `validate_config`（非法 yml 回退默认值 + notes，不杀 job）+ 落库前 `privacy.redact_secrets` 脱敏 findings/report。M11：inline RIGHT 行号 + fingerprint upsert。Phase2（M9 / 0.9.0）：findings 写回 Postgres。M8：Check Run。M7：CI。M6：`ignore_paths`。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -59,9 +59,10 @@ tests/
 ## 配置（`.pr-sentinel.yml`）
 
 - Worker **只读 default branch** 上的 `.pr-sentinel.yml`（PR 分支上的配置忽略）。
-- 合并策略：`deep_merge(DEFAULT_CONFIG, repo_yml)`。
+- 合并策略：`deep_merge(DEFAULT_CONFIG, repo_yml)`；加载后手写 `validate_config` 校验未知键 / 类型 / 枚举，坏字段回退默认值并追加中文 notes（**不**因非法值失败整 job；解析失败仍仅用 DEFAULT）。
 - 文件不存在 / 解析失败 → 仅用 `DEFAULT_CONFIG`，并在报告中注明。
 - Fixture 模式：读 `tests/fixtures/pr-sentinel.yml`。
+- **落库脱敏**：`privacy.redact_secrets`（默认 true）时，Worker 在写入 Postgres 的 findings（含 `meta.match`）与 `report_md` 前做 `***REDACTED***` 替换。
 
 示例见 [`examples/.pr-sentinel.yml`](./examples/.pr-sentinel.yml) / [`.pr-sentinel.yml.example`](./.pr-sentinel.yml.example)。
 
@@ -76,7 +77,7 @@ tests/
 | `rules.secrets` | patch/文件名正则 |
 | `rules.large_files` | `max_bytes`（patch 字节）、`max_additions`、`binary_extensions`；无 patch 且高 changes/二进制扩展 → `binary_or_truncated`（不臆造真实 size） |
 | `rules.weakened_tests` | 删除测试文件或 assert 净减少 |
-| `privacy.redact_secrets` | 送入 LLM 前对文本做密钥 redact（`***REDACTED***`） |
+| `privacy.redact_secrets` | 送入 LLM 前 redact；成功落库前也对 findings/`report_md`（含 `meta.match`）脱敏（`***REDACTED***`，默认 true） |
 | `llm.enabled` | 是否启用 LLM（仍需 API Key） |
 | `llm.max_patch_chars` | 送入 LLM 的 patch 截断长度（默认 12000） |
 | `llm.temperature` | 默认 `0.2` |

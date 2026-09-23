@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -106,6 +107,55 @@ def _secret_patterns_from_config(config: dict[str, Any]) -> list[str]:
         if extra not in pats:
             pats.append(extra)
     return pats
+
+
+def _redact_any(value: Any, *, patterns: list[str], enabled: bool) -> Any:
+    """Recursively redact string leaves (and nested dict/list values)."""
+    if isinstance(value, str):
+        return redact_secrets(value, patterns=patterns, enabled=enabled)
+    if isinstance(value, dict):
+        return {
+            k: _redact_any(v, patterns=patterns, enabled=enabled)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_any(v, patterns=patterns, enabled=enabled) for v in value]
+    return value
+
+
+def redact_findings_for_storage(
+    findings: list[dict[str, Any]],
+    report_md: str | None,
+    config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Redact secret-like strings in findings + report before Postgres write.
+
+    Respects ``privacy.redact_secrets`` (default True). Operates on a deep copy
+    so callers can still publish raw findings to GitHub if desired.
+    """
+    privacy = config.get("privacy") or {}
+    enabled = bool(privacy.get("redact_secrets", True))
+    if not enabled:
+        return copy.deepcopy(findings), report_md
+
+    patterns = _secret_patterns_from_config(config)
+    out: list[dict[str, Any]] = []
+    for item in findings:
+        fd = copy.deepcopy(item) if isinstance(item, dict) else item
+        if not isinstance(fd, dict):
+            out.append(fd)
+            continue
+        for key in ("message", "detail", "title"):
+            if key in fd and isinstance(fd[key], str):
+                fd[key] = redact_secrets(fd[key], patterns=patterns, enabled=True)
+        if "meta" in fd and fd["meta"] is not None:
+            fd["meta"] = _redact_any(fd["meta"], patterns=patterns, enabled=True)
+        out.append(fd)
+
+    redacted_report = report_md
+    if isinstance(report_md, str):
+        redacted_report = redact_secrets(report_md, patterns=patterns, enabled=True)
+    return out, redacted_report
 
 
 def truncate_patch_text(files: list[dict[str, Any]], max_chars: int) -> tuple[str, bool]:

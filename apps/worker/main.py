@@ -27,7 +27,10 @@ from pr_sentinel_github.check_runs import (  # noqa: E402
     publish_inline_comments,
 )
 from pr_sentinel_github.comments import upsert_pr_comment  # noqa: E402
-from pr_sentinel_github.llm import LLMTransientError  # noqa: E402
+from pr_sentinel_github.llm import (  # noqa: E402
+    LLMTransientError,
+    redact_findings_for_storage,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -191,6 +194,16 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
                 findings=findings,
                 files=files,
             )
+
+        # M12: redact secrets before persistence / result["findings"] (GitHub
+        # publish above may still carry raw text — 落库路径必须脱敏).
+        redacted_findings, redacted_report = redact_findings_for_storage(
+            out.get("findings") or [],
+            out.get("report"),
+            config,
+        )
+        out["findings"] = redacted_findings
+        out["report"] = redacted_report
 
         return out
     finally:
