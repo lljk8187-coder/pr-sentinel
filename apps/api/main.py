@@ -1,4 +1,4 @@
-"""FastAPI webhook receiver for GitHub pull_request events."""
+"""FastAPI webhook receiver for GitHub pull_request events (arq enqueue)."""
 
 from __future__ import annotations
 
@@ -7,32 +7,57 @@ import hmac
 import json
 import logging
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-# Allow running without install: repo root + packages on path
 _ROOT = Path(__file__).resolve().parents[2]
 for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
     sp = str(p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
-from common.queue import JobQueue  # noqa: E402
+from common.queue import claim_delivery, create_arq_pool, enqueue_process_pr  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pr-sentinel.api")
 
-app = FastAPI(title="pr-sentinel", version="0.1.0", description="M1 quality-gate webhook API")
-
 TARGET_ACTIONS = {"opened", "synchronize"}
+
+# Injected in tests; production uses lifespan pool
+_arq_pool = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    global _arq_pool
+    settings = get_settings()
+    try:
+        _arq_pool = await create_arq_pool(settings.redis_url)
+        logger.info("arq pool ready (%s)", settings.redis_url)
+    except Exception:
+        logger.exception("arq pool init failed — enqueue will retry/fail per request")
+        _arq_pool = None
+    yield
+    if _arq_pool is not None:
+        await _arq_pool.close()
+        _arq_pool = None
+
+
+app = FastAPI(
+    title="pr-sentinel",
+    version="0.1.0",
+    description="M1 quality-gate webhook API",
+    lifespan=lifespan,
+)
 
 
 def verify_signature(secret: str, body: bytes, signature_header: str | None) -> bool:
-    """Verify X-Hub-Signature-256 (sha256=<hex>)."""
+    """Verify X-Hub-Signature-256 (sha256=<hex>). Always required unless skip switch."""
     if not signature_header or not signature_header.startswith("sha256="):
         return False
     expected = signature_header.removeprefix("sha256=")
@@ -69,11 +94,6 @@ def extract_job_payload(event: str, payload: dict[str, Any]) -> dict[str, Any] |
     }
 
 
-def get_queue(settings: Settings | None = None) -> JobQueue:
-    s = settings or get_settings()
-    return JobQueue(s.redis_url, s.queue_key)
-
-
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "pr-sentinel-api"}
@@ -89,6 +109,7 @@ async def github_webhook(
     settings = get_settings()
     body = await request.body()
 
+    # HMAC still required when using smee locally unless explicit skip switch
     if not settings.skip_webhook_verify:
         if not verify_signature(settings.github_webhook_secret, body, x_hub_signature_256):
             logger.warning("webhook signature verification failed delivery=%s", x_github_delivery)
@@ -113,16 +134,39 @@ async def github_webhook(
     if not job.get("pr_number") or not job.get("head_sha"):
         return JSONResponse(status_code=200, content={"status": "ignored", "reason": "missing pr fields"})
 
-    queue = get_queue(settings)
-    queue.enqueue(job)
+    # Persist delivery id (SET NX) before enqueue — idempotent redelivery
+    claimed = await claim_delivery(
+        settings.redis_url,
+        x_github_delivery,
+        prefix=settings.delivery_dedup_prefix,
+        ttl=settings.delivery_dedup_ttl,
+    )
+    if not claimed:
+        logger.info("duplicate delivery=%s — ack without re-enqueue", x_github_delivery)
+        return JSONResponse(
+            status_code=200,
+            content={"status": "duplicate", "delivery": x_github_delivery},
+        )
+
+    job["delivery_id"] = x_github_delivery
+
+    pool = _arq_pool
+    if pool is None:
+        pool = await create_arq_pool(settings.redis_url)
+
+    job_id = await enqueue_process_pr(pool, job)
     logger.info(
-        "accepted PR %s#%s sha=%s delivery=%s",
+        "accepted PR %s#%s sha=%s delivery=%s arq=%s",
         job["full_name"],
         job["pr_number"],
         (job.get("head_sha") or "")[:12],
         x_github_delivery,
+        job_id,
     )
-    return JSONResponse(status_code=202, content={"status": "queued", "job": job})
+    return JSONResponse(
+        status_code=202,
+        content={"status": "queued", "job": job, "arq_job_id": job_id},
+    )
 
 
 def create_app() -> FastAPI:

@@ -1,5 +1,4 @@
-# PR Sentinel M1 — api + worker + redis + postgres (placeholder)
-# Usage (from repo root):
+# PR Sentinel M1 — api + arq worker + redis + postgres (placeholder)
 #   docker compose -f deploy/docker-compose.yml up --build
 #   curl http://localhost:8000/health
 
@@ -38,10 +37,11 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-dev-secret}
-      WEBHOOK_SKIP_VERIFY: ${WEBHOOK_SKIP_VERIFY:-true}
+      WEBHOOK_SKIP_VERIFY: ${WEBHOOK_SKIP_VERIFY:-false}
       USE_FIXTURES: ${USE_FIXTURES:-true}
       FIXTURES_DIR: /app/tests/fixtures
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       LOG_LEVEL: INFO
     depends_on:
       redis:

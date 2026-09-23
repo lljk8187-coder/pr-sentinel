@@ -1,11 +1,9 @@
-"""Queue consumer: fetch PR files → fake analyze → idempotent comment."""
+"""arq worker: fetch PR files → fake analyze → sticky summary comment."""
 
 from __future__ import annotations
 
 import logging
-import signal
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +13,8 @@ for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
-from common.queue import JobQueue  # noqa: E402
+from common.defaults import get_default_config  # noqa: E402
+from common.queue import redis_settings_from_url  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
 from pr_sentinel_github.analyzer import FakeAnalyzer  # noqa: E402
 from pr_sentinel_github.client import GitHubClient  # noqa: E402
@@ -27,14 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pr-sentinel.worker")
 
-_running = True
-
-
-def _handle_signal(signum: int, _frame: Any) -> None:
-    global _running
-    logger.info("received signal %s, shutting down…", signum)
-    _running = False
-
 
 def build_client(settings: Settings, installation_id: int | None = None) -> GitHubClient:
     private_key = settings.github_app_private_key
@@ -42,6 +33,7 @@ def build_client(settings: Settings, installation_id: int | None = None) -> GitH
         private_key = Path(settings.github_app_private_key_path).read_text(encoding="utf-8")
 
     use_fixtures = settings.use_fixtures
+    # If neither App nor PAT configured, force fixtures
     if not settings.github_token and not (settings.github_app_id and private_key):
         use_fixtures = True
 
@@ -52,21 +44,37 @@ def build_client(settings: Settings, installation_id: int | None = None) -> GitH
         installation_id=installation_id,
         use_fixtures=use_fixtures,
         fixtures_dir=settings.fixtures_path(),
+        max_pages=settings.diff_max_pages,
+        per_page=settings.diff_per_page,
+        max_files=settings.diff_max_files,
     )
 
 
 def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[str, Any]:
+    """Synchronous job body (also callable from tests)."""
     settings = settings or get_settings()
+    config = get_default_config()  # M1: built-in defaults, no repo .pr-sentinel.yml read
+
     owner = job["owner"]
     repo = job["repo"]
     pr_number = int(job["pr_number"])
     head_sha = job["head_sha"]
     installation_id = job.get("installation_id")
 
+    # Overlay env truncation onto config for report display
+    config["diff"]["max_pages"] = settings.diff_max_pages
+    config["diff"]["max_files"] = settings.diff_max_files
+
     client = build_client(settings, installation_id=installation_id)
     try:
         files = client.list_pr_files(owner, repo, pr_number)
-        report = FakeAnalyzer().analyze(files, head_sha=head_sha, pr_number=pr_number)
+        report = FakeAnalyzer().analyze(
+            files,
+            head_sha=head_sha,
+            pr_number=pr_number,
+            truncated=client.truncated,
+            config=config,
+        )
         result = upsert_pr_comment(
             client,
             owner=owner,
@@ -76,39 +84,42 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
             report_body=report,
         )
         logger.info(
-            "done %s/%s#%s action=%s",
+            "done %s/%s#%s action=%s truncated=%s",
             owner,
             repo,
             pr_number,
             result.get("_action"),
+            client.truncated,
         )
         return result
     finally:
         client.close()
 
 
-def run_forever(settings: Settings | None = None) -> None:
-    settings = settings or get_settings()
-    queue = JobQueue(settings.redis_url, settings.queue_key)
-    logger.info("worker started redis=%s key=%s", settings.redis_url, settings.queue_key)
+async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
+    """arq function name must match enqueue_job('process_pr', …)."""
+    settings = ctx.get("settings") or get_settings()
+    return process_job(job, settings)
 
-    signal.signal(signal.SIGINT, _handle_signal)
-    signal.signal(signal.SIGTERM, _handle_signal)
 
-    while _running:
-        try:
-            job = queue.dequeue(timeout=5)
-        except Exception:
-            logger.exception("dequeue failed; sleeping")
-            time.sleep(2)
-            continue
-        if job is None:
-            continue
-        try:
-            process_job(job, settings)
-        except Exception:
-            logger.exception("job failed: %s", job)
+async def on_startup(ctx: dict[str, Any]) -> None:
+    ctx["settings"] = get_settings()
+    logger.info("arq worker startup redis=%s", ctx["settings"].redis_url)
+
+
+class WorkerSettings:
+    """arq CLI entry: ``arq apps.worker.main.WorkerSettings`` (with PYTHONPATH)."""
+
+    functions = [process_pr]
+    on_startup = on_startup
+    redis_settings = redis_settings_from_url(get_settings().redis_url)
 
 
 if __name__ == "__main__":
-    run_forever()
+    # ``python apps/worker/main.py`` → run arq worker
+    import os
+
+    os.chdir(_ROOT)
+    from arq.worker import run_worker
+
+    run_worker(WorkerSettings)

@@ -1,4 +1,4 @@
-"""GitHub REST client with fixture / token / app-placeholder auth."""
+"""GitHub REST client — App (prod placeholder) / PAT fallback / fixtures."""
 
 from __future__ import annotations
 
@@ -11,17 +11,19 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-COMMENT_MARKER_PREFIX = "<!-- pr-sentinel:"
 GITHUB_API = "https://api.github.com"
 
 
 class GitHubClient:
     """Minimal GitHub client for PR files + issue comments.
 
-    Auth priority:
-      1. GITHUB_TOKEN (Bearer)
-      2. App ID + private key + installation_id (placeholder; falls back to fixtures)
+    Auth priority (M1):
+      1. GitHub App ID + private key + installation_id (JWT exchange **placeholder**)
+      2. GITHUB_TOKEN / PAT (local / fallback)
       3. USE_FIXTURES=true → local JSON, no network
+
+    When App creds are set but exchange is not wired, callers should use
+    fixtures or a PAT until M2 completes real App auth.
     """
 
     def __init__(
@@ -34,6 +36,9 @@ class GitHubClient:
         use_fixtures: bool = False,
         fixtures_dir: str | Path = "tests/fixtures",
         http_client: httpx.Client | None = None,
+        max_pages: int = 5,
+        per_page: int = 100,
+        max_files: int = 300,
     ):
         self.token = token
         self.app_id = app_id
@@ -41,10 +46,13 @@ class GitHubClient:
         self.installation_id = installation_id
         self.use_fixtures = use_fixtures
         self.fixtures_dir = Path(fixtures_dir)
+        self.max_pages = max_pages
+        self.per_page = per_page
+        self.max_files = max_files
         self._http = http_client
         self._owns_http = http_client is None
-        # Captured HTTP calls in fixture / mock mode for tests
         self.calls: list[dict[str, Any]] = []
+        self.truncated: bool = False
 
     def _ensure_http(self) -> httpx.Client:
         if self._http is None:
@@ -63,23 +71,38 @@ class GitHubClient:
     def __exit__(self, *args: object) -> None:
         self.close()
 
+    @property
+    def _has_app_creds(self) -> bool:
+        return bool(self.app_id and self.app_private_key)
+
+    @property
+    def _should_use_fixtures(self) -> bool:
+        if self.use_fixtures:
+            return True
+        # No real auth available → fixtures
+        if not self.token and not self._has_app_creds:
+            return True
+        return False
+
     def _auth_headers(self) -> dict[str, str]:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "pr-sentinel/0.1",
         }
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-            return headers
-        if self.app_id and self.app_private_key and self.installation_id:
-            # M1 placeholder: real JWT + installation token exchange not wired.
-            # Callers should set USE_FIXTURES=true until App auth is implemented.
+        # Prod path (placeholder): App installation token
+        if self._has_app_creds and self.installation_id and not self.token:
+            # M1: JWT → installation access token NOT implemented.
             logger.warning(
-                "GitHub App credentials present but M1 uses placeholder; "
-                "prefer GITHUB_TOKEN or USE_FIXTURES=true"
+                "GitHub App placeholder auth (installation_id=%s); "
+                "real JWT exchange is M2 — use GITHUB_TOKEN or USE_FIXTURES",
+                self.installation_id,
             )
             headers["Authorization"] = f"Bearer app-placeholder-{self.installation_id}"
+            return headers
+        # Local / fallback: PAT or fine-grained token
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
             return headers
         return headers
 
@@ -90,20 +113,49 @@ class GitHubClient:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def list_pr_files(self, owner: str, repo: str, pr_number: int) -> list[dict[str, Any]]:
-        if self.use_fixtures or (not self.token and not (self.app_id and self.app_private_key)):
+        """GET /repos/{owner}/{repo}/pulls/{n}/files with pagination + truncation."""
+        if self._should_use_fixtures:
             logger.info("list_pr_files via fixtures (%s/%s#%s)", owner, repo, pr_number)
             data = self._fixture("pr_files.json")
-            self.calls.append({"method": "GET", "path": f"/repos/{owner}/{repo}/pulls/{pr_number}/files", "fixture": True})
-            return data
+            self.calls.append(
+                {
+                    "method": "GET",
+                    "path": f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                    "fixture": True,
+                }
+            )
+            truncated = data[: self.max_files]
+            self.truncated = len(data) > self.max_files
+            return truncated
 
-        url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}/files"
-        resp = self._ensure_http().get(url, headers=self._auth_headers(), params={"per_page": 100})
-        self.calls.append({"method": "GET", "path": url, "status": resp.status_code})
-        resp.raise_for_status()
-        return resp.json()
+        http = self._ensure_http()
+        headers = self._auth_headers()
+        all_files: list[dict[str, Any]] = []
+        self.truncated = False
+
+        for page in range(1, self.max_pages + 1):
+            url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}/files"
+            params = {"per_page": self.per_page, "page": page}
+            resp = http.get(url, headers=headers, params=params)
+            self.calls.append({"method": "GET", "path": url, "page": page, "status": resp.status_code})
+            resp.raise_for_status()
+            batch = resp.json()
+            if not isinstance(batch, list):
+                break
+            all_files.extend(batch)
+            if len(all_files) >= self.max_files:
+                self.truncated = True
+                all_files = all_files[: self.max_files]
+                break
+            if len(batch) < self.per_page:
+                break
+            if page == self.max_pages and len(batch) == self.per_page:
+                self.truncated = True
+
+        return all_files
 
     def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, Any]]:
-        if self.use_fixtures or (not self.token and not (self.app_id and self.app_private_key)):
+        if self._should_use_fixtures:
             data = self._fixture("issue_comments.json")
             self.calls.append(
                 {
@@ -124,9 +176,13 @@ class GitHubClient:
         self, owner: str, repo: str, issue_number: int, body: str
     ) -> dict[str, Any]:
         path = f"/repos/{owner}/{repo}/issues/{issue_number}/comments"
-        if self.use_fixtures or (not self.token and not (self.app_id and self.app_private_key)):
+        if self._should_use_fixtures:
             logger.info("create_issue_comment mocked (fixture mode)")
-            result = {"id": 9001, "body": body, "html_url": f"https://github.com/{owner}/{repo}/issues/{issue_number}#comment-9001"}
+            result = {
+                "id": 9001,
+                "body": body,
+                "html_url": f"https://github.com/{owner}/{repo}/issues/{issue_number}#comment-9001",
+            }
             self.calls.append({"method": "POST", "path": path, "body": body, "fixture": True, "result": result})
             return result
 
@@ -140,7 +196,7 @@ class GitHubClient:
         self, owner: str, repo: str, comment_id: int, body: str
     ) -> dict[str, Any]:
         path = f"/repos/{owner}/{repo}/issues/comments/{comment_id}"
-        if self.use_fixtures or (not self.token and not (self.app_id and self.app_private_key)):
+        if self._should_use_fixtures:
             logger.info("update_issue_comment mocked (fixture mode) id=%s", comment_id)
             result = {"id": comment_id, "body": body}
             self.calls.append({"method": "PATCH", "path": path, "body": body, "fixture": True, "result": result})
@@ -151,7 +207,3 @@ class GitHubClient:
         self.calls.append({"method": "PATCH", "path": url, "status": resp.status_code})
         resp.raise_for_status()
         return resp.json()
-
-
-def marker_for_sha(head_sha: str) -> str:
-    return f"{COMMENT_MARKER_PREFIX}{head_sha} -->"

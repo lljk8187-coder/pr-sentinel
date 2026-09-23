@@ -20,8 +20,11 @@ class Settings(BaseSettings):
     allow_insecure_webhooks: bool = False
 
     redis_url: str = "redis://localhost:6379/0"
-    queue_key: str = "pr-sentinel:jobs"
+    # Delivery dedup key prefix + TTL (seconds)
+    delivery_dedup_prefix: str = "pr-sentinel:delivery:"
+    delivery_dedup_ttl: int = 86400 * 7  # 7 days
 
+    # Auth: production prefers GitHub App; local/PAT is fallback
     github_token: str = ""
     github_app_id: str = ""
     github_app_private_key: str = ""
@@ -29,6 +32,11 @@ class Settings(BaseSettings):
 
     use_fixtures: bool = False
     fixtures_dir: str = "tests/fixtures"
+
+    # Diff truncation (also mirrored in defaults.DEFAULT_CONFIG)
+    diff_max_pages: int = 5
+    diff_per_page: int = 100
+    diff_max_files: int = 300
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
