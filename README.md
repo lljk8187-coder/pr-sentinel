@@ -1,10 +1,10 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M1 可演示骨架**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队 → Worker 拉 diff → 假分析 → **Sticky** PR Comment。
+GitHub PR 质量闸门 — **M2**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队 → Worker 读 **default branch** `.pr-sentinel.yml` → 拉 diff → **规则引擎** → **Sticky** PR Comment（`update_strategy`）。
 
-> 本阶段 **不做** 完整 LLM / Web UI / 规则引擎 / SaaS 化（留给 M2+）。
+> 本阶段 **不做** 完整 LLM / Web UI / SaaS 化（留给后续里程碑）。
 
-## 架构（M1）
+## 架构（M2）
 
 ```
 GitHub / smee.io ──► apps/api (FastAPI)
@@ -16,9 +16,12 @@ GitHub / smee.io ──► apps/api (FastAPI)
                         │
                         ▼
                   apps/worker (arq)
+                        │ GET default_branch + contents/.pr-sentinel.yml
+                        │ deep_merge(DEFAULT_CONFIG, repo_yml)
                         │ packages/github 拉 PR files（分页+截断）
-                        │ FakeAnalyzer + 内置默认配置
-                        └─► sticky issues/{n}/comments
+                        │ RulesAnalyzer（secrets / large_files / weakened_tests）
+                        │ ignore_paths 先过滤
+                        └─► sticky issues/{n}/comments（update|recreate|skip_if_exists）
 ```
 
 ## 目录
@@ -26,17 +29,40 @@ GitHub / smee.io ──► apps/api (FastAPI)
 ```
 apps/api/                 FastAPI：POST /webhooks/github
 apps/worker/              arq WorkerSettings + process_pr
-packages/common/          settings / arq 队列 / delivery 去重 / 默认配置
-packages/github/          GitHub 客户端 + 假分析 + sticky comment
+packages/common/          settings / arq 队列 / delivery 去重 / DEFAULT_CONFIG / 配置合并
+packages/github/          GitHub 客户端 + App JWT + 规则引擎 + sticky comment
+examples/.pr-sentinel.yml 示例仓库配置
+.pr-sentinel.yml.example  同上（仓库根副本）
 deploy/docker-compose.yml
 tests/
 ```
+
+## 配置（`.pr-sentinel.yml`）
+
+- Worker **只读 default branch** 上的 `.pr-sentinel.yml`（PR 分支上的配置忽略）。
+- 合并策略：`deep_merge(DEFAULT_CONFIG, repo_yml)`。
+- 文件不存在 / 解析失败 → 仅用 `DEFAULT_CONFIG`，并在报告中注明。
+- Fixture 模式：读 `tests/fixtures/pr-sentinel.yml`。
+
+示例见 [`examples/.pr-sentinel.yml`](./examples/.pr-sentinel.yml) / [`.pr-sentinel.yml.example`](./.pr-sentinel.yml.example)。
+
+关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `update_strategy` | `update`（默认 PATCH）/ `recreate`（删旧再 POST）/ `skip_if_exists` |
+| `ignore_paths` | glob，匹配文件不进入规则扫描 |
+| `rules.secrets` | patch/文件名正则 |
+| `rules.large_files` | 按 patch 长度 / additions 启发式 |
+| `rules.weakened_tests` | 删除测试文件或 assert 净减少 |
+| `analyzer.mode` | `rules`（默认）或 `fake` |
+| `diff.max_*` | 分页与截断；截断时报告正文声明 **Limits 截断** |
 
 ## 认证
 
 | 场景 | 方式 |
 | --- | --- |
-| **生产（目标）** | GitHub App（`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` + installation）。M1 为**占位**，JWT→installation token 交换在 M2 |
+| **生产** | GitHub App：`GITHUB_APP_ID` + private key + webhook `installation.id` → JWT → `POST /app/installations/{id}/access_tokens` |
 | **本地 / 兜底** | `GITHUB_TOKEN`（PAT / fine-grained） |
 | **无凭据演示** | `USE_FIXTURES=true` 读 `tests/fixtures/`，不打真网 |
 
@@ -107,18 +133,19 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 <!-- pr-sentinel:summary:{owner}/{repo}:{pr_number} -->
 ```
 
-- `GET .../issues/{n}/comments` → 若已有 marker → `PATCH`；否则 `POST`。  
-- `synchronize` 只更新同一条 sticky summary。
+- `update`：已有 marker → `PATCH`；否则 `POST`。
+- `recreate`：删旧再 `POST`。
+- `skip_if_exists`：已有 marker 则跳过。
 
 ## Diff 拉取
 
 `GET /repos/{owner}/{repo}/pulls/{n}/files`，分页 + 截断：
 
-- `DIFF_MAX_PAGES`（默认 5）
-- `DIFF_PER_PAGE`（默认 100）
-- `DIFF_MAX_FILES`（默认 300）
+- `DIFF_MAX_PAGES` / config `diff.max_pages`（默认 5）
+- `DIFF_PER_PAGE` / `diff.per_page`（默认 100）
+- `DIFF_MAX_FILES` / `diff.max_files`（默认 300）
 
-截断时报告中标注。配置与内置 `DEFAULT_CONFIG`（等同未来 `.pr-sentinel.yml`）一致；**M1 不读仓库文件**。
+截断时报告中标注 **Limits 截断声明**。
 
 ## 测试
 

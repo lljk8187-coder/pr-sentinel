@@ -1,13 +1,15 @@
-"""GitHub API client for pr-sentinel (App placeholder / PAT / fixtures)."""
+"""GitHub API client for pr-sentinel (App JWT / PAT / fixtures + rules)."""
 
+from .analyzer import FakeAnalyzer, RulesAnalyzer, build_report, get_analyzer
 from .client import GitHubClient
-from .analyzer import FakeAnalyzer, build_report
-from .comments import upsert_pr_comment, summary_marker
+from .comments import summary_marker, upsert_pr_comment
 
 __all__ = [
     "GitHubClient",
     "FakeAnalyzer",
+    "RulesAnalyzer",
     "build_report",
+    "get_analyzer",
     "upsert_pr_comment",
     "summary_marker",
 ]

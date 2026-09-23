@@ -50,8 +50,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="pr-sentinel",
-    version="0.1.0",
-    description="M1 quality-gate webhook API",
+    version="0.2.0",
+    description="M2 quality-gate webhook API",
     lifespan=lifespan,
 )
 

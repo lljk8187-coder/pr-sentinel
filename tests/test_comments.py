@@ -158,8 +158,8 @@ def test_worker_process_job_fixture_mode(fixtures_dir: Path):
 def test_default_config_constants():
     from common.defaults import DEFAULT_CONFIG, get_default_config
 
-    assert DEFAULT_CONFIG["analyzer"]["mode"] == "fake"
+    assert DEFAULT_CONFIG["analyzer"]["mode"] == "rules"
     assert DEFAULT_CONFIG["diff"]["max_files"] == 300
     cfg = get_default_config()
     cfg["analyzer"]["mode"] = "mutated"
-    assert DEFAULT_CONFIG["analyzer"]["mode"] == "fake"
+    assert DEFAULT_CONFIG["analyzer"]["mode"] == "rules"

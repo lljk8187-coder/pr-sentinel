@@ -1,4 +1,4 @@
-"""arq worker: fetch PR files → fake analyze → sticky summary comment."""
+"""arq worker: load config → fetch PR files → rules analyze → sticky comment."""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ for p in (_ROOT, _ROOT / "packages", _ROOT / "packages" / "github"):
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
-from common.defaults import get_default_config  # noqa: E402
+from common.config import CONFIG_FILENAME, load_repo_config  # noqa: E402
 from common.queue import redis_settings_from_url  # noqa: E402
 from common.settings import Settings, get_settings  # noqa: E402
-from pr_sentinel_github.analyzer import FakeAnalyzer  # noqa: E402
+from pr_sentinel_github.analyzer import get_analyzer  # noqa: E402
 from pr_sentinel_github.client import GitHubClient  # noqa: E402
 from pr_sentinel_github.comments import upsert_pr_comment  # noqa: E402
 
@@ -50,10 +50,31 @@ def build_client(settings: Settings, installation_id: int | None = None) -> GitH
     )
 
 
+def _load_job_config(
+    client: GitHubClient,
+    settings: Settings,
+    owner: str,
+    repo: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Load DEFAULT_CONFIG ⊕ default-branch `.pr-sentinel.yml` (never PR branch)."""
+    if client._should_use_fixtures:  # noqa: SLF001 — intentional fixture branch
+        return load_repo_config(
+            use_fixtures=True,
+            fixtures_dir=settings.fixtures_path(),
+        )
+
+    def fetch_yml() -> str | None:
+        default_branch = client.get_default_branch(owner, repo)
+        return client.get_file_contents(
+            owner, repo, CONFIG_FILENAME, ref=default_branch
+        )
+
+    return load_repo_config(fetch_yml=fetch_yml)
+
+
 def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[str, Any]:
     """Synchronous job body (also callable from tests)."""
     settings = settings or get_settings()
-    config = get_default_config()  # M1: built-in defaults, no repo .pr-sentinel.yml read
 
     owner = job["owner"]
     repo = job["repo"]
@@ -61,20 +82,35 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
     head_sha = job["head_sha"]
     installation_id = job.get("installation_id")
 
-    # Overlay env truncation onto config for report display
-    config["diff"]["max_pages"] = settings.diff_max_pages
-    config["diff"]["max_files"] = settings.diff_max_files
-
     client = build_client(settings, installation_id=installation_id)
     try:
+        config, config_notes = _load_job_config(client, settings, owner, repo)
+
+        # Env truncation overlays (ops knobs) onto merged config
+        config.setdefault("diff", {})
+        config["diff"]["max_pages"] = settings.diff_max_pages
+        config["diff"]["per_page"] = settings.diff_per_page
+        config["diff"]["max_files"] = settings.diff_max_files
+        client.max_pages = settings.diff_max_pages
+        client.per_page = settings.diff_per_page
+        client.max_files = settings.diff_max_files
+
         files = client.list_pr_files(owner, repo, pr_number)
-        report = FakeAnalyzer().analyze(
+        analyzer = get_analyzer(config)
+        report = analyzer.analyze(
             files,
             head_sha=head_sha,
             pr_number=pr_number,
             truncated=client.truncated,
             config=config,
+            config_notes=config_notes,
         )
+
+        if not config.get("summary_comment", True):
+            logger.info("summary_comment=false — skipping sticky comment")
+            return {"_action": "skipped_comment", "report": report}
+
+        strategy = str(config.get("update_strategy") or "update")
         result = upsert_pr_comment(
             client,
             owner=owner,
@@ -82,14 +118,16 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
             pr_number=pr_number,
             head_sha=head_sha,
             report_body=report,
+            update_strategy=strategy,
         )
         logger.info(
-            "done %s/%s#%s action=%s truncated=%s",
+            "done %s/%s#%s action=%s truncated=%s strategy=%s",
             owner,
             repo,
             pr_number,
             result.get("_action"),
             client.truncated,
+            strategy,
         )
         return result
     finally:

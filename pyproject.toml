@@ -1,7 +1,7 @@
 [project]
 name = "pr-sentinel"
-version = "0.1.0"
-description = "PR quality gate — M1 webhook + arq + fake analyzer skeleton"
+version = "0.2.0"
+description = "PR quality gate — M2 rules engine + config + App JWT"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -12,6 +12,9 @@ dependencies = [
     "redis>=5.0.0",
     "arq>=0.26.0",
     "pydantic-settings>=2.0.0",
+    "PyYAML>=6.0",
+    "PyJWT>=2.8.0",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

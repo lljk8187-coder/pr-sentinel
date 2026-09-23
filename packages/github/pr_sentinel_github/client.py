@@ -1,7 +1,8 @@
-"""GitHub REST client — App (prod placeholder) / PAT fallback / fixtures."""
+"""GitHub REST client — App JWT / PAT / fixtures."""
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from pathlib import Path
@@ -9,21 +10,20 @@ from typing import Any
 
 import httpx
 
+from .auth import exchange_installation_token
+
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
 
 
 class GitHubClient:
-    """Minimal GitHub client for PR files + issue comments.
+    """Minimal GitHub client for PR files + issue comments + config contents.
 
-    Auth priority (M1):
-      1. GitHub App ID + private key + installation_id (JWT exchange **placeholder**)
+    Auth priority:
+      1. GitHub App ID + private key + installation_id → JWT → installation token
       2. GITHUB_TOKEN / PAT (local / fallback)
       3. USE_FIXTURES=true → local JSON, no network
-
-    When App creds are set but exchange is not wired, callers should use
-    fixtures or a PAT until M2 completes real App auth.
     """
 
     def __init__(
@@ -53,6 +53,8 @@ class GitHubClient:
         self._owns_http = http_client is None
         self.calls: list[dict[str, Any]] = []
         self.truncated: bool = False
+        self._installation_token: str | None = None
+        self._installation_token_for: int | None = None
 
     def _ensure_http(self) -> httpx.Client:
         if self._http is None:
@@ -79,31 +81,40 @@ class GitHubClient:
     def _should_use_fixtures(self) -> bool:
         if self.use_fixtures:
             return True
-        # No real auth available → fixtures
         if not self.token and not self._has_app_creds:
             return True
         return False
+
+    def _resolve_bearer(self) -> str | None:
+        """Prefer explicit PAT; else exchange App installation token."""
+        if self.token:
+            return self.token
+        if self._has_app_creds and self.installation_id:
+            if (
+                self._installation_token
+                and self._installation_token_for == self.installation_id
+            ):
+                return self._installation_token
+            token = exchange_installation_token(
+                app_id=self.app_id,
+                private_key_pem=self.app_private_key,
+                installation_id=int(self.installation_id),
+                http_client=self._ensure_http(),
+            )
+            self._installation_token = token
+            self._installation_token_for = int(self.installation_id)
+            return token
+        return None
 
     def _auth_headers(self) -> dict[str, str]:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "pr-sentinel/0.1",
+            "User-Agent": "pr-sentinel/0.2",
         }
-        # Prod path (placeholder): App installation token
-        if self._has_app_creds and self.installation_id and not self.token:
-            # M1: JWT → installation access token NOT implemented.
-            logger.warning(
-                "GitHub App placeholder auth (installation_id=%s); "
-                "real JWT exchange is M2 — use GITHUB_TOKEN or USE_FIXTURES",
-                self.installation_id,
-            )
-            headers["Authorization"] = f"Bearer app-placeholder-{self.installation_id}"
-            return headers
-        # Local / fallback: PAT or fine-grained token
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-            return headers
+        bearer = self._resolve_bearer()
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
         return headers
 
     def _fixture(self, name: str) -> Any:
@@ -111,6 +122,101 @@ class GitHubClient:
         if not path.exists():
             raise FileNotFoundError(f"fixture not found: {path}")
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def get_repo(self, owner: str, repo: str) -> dict[str, Any]:
+        """GET /repos/{owner}/{repo} — used for default_branch."""
+        if self._should_use_fixtures:
+            path = self.fixtures_dir / "repo.json"
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+            else:
+                data = {"default_branch": "main", "full_name": f"{owner}/{repo}"}
+            self.calls.append(
+                {
+                    "method": "GET",
+                    "path": f"/repos/{owner}/{repo}",
+                    "fixture": True,
+                }
+            )
+            return data
+
+        url = f"{GITHUB_API}/repos/{owner}/{repo}"
+        resp = self._ensure_http().get(url, headers=self._auth_headers())
+        self.calls.append({"method": "GET", "path": url, "status": resp.status_code})
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_default_branch(self, owner: str, repo: str) -> str:
+        info = self.get_repo(owner, repo)
+        return str(info.get("default_branch") or "main")
+
+    def get_file_contents(
+        self, owner: str, repo: str, path: str, *, ref: str
+    ) -> str | None:
+        """GET /repos/{owner}/{repo}/contents/{path}?ref=…
+
+        Returns decoded UTF-8 text, or None if 404 / missing.
+        """
+        if self._should_use_fixtures:
+            # Prefer local fixture file named after basename
+            local = self.fixtures_dir / Path(path).name
+            alt = self.fixtures_dir / path.lstrip("/")
+            # also pr-sentinel.yml without leading dot
+            candidates = [
+                self.fixtures_dir / "pr-sentinel.yml",
+                self.fixtures_dir / ".pr-sentinel.yml",
+                local,
+                alt,
+            ]
+            for c in candidates:
+                if c.exists() and c.is_file():
+                    self.calls.append(
+                        {
+                            "method": "GET",
+                            "path": f"/repos/{owner}/{repo}/contents/{path}",
+                            "ref": ref,
+                            "fixture": True,
+                        }
+                    )
+                    return c.read_text(encoding="utf-8")
+            self.calls.append(
+                {
+                    "method": "GET",
+                    "path": f"/repos/{owner}/{repo}/contents/{path}",
+                    "ref": ref,
+                    "fixture": True,
+                    "status": 404,
+                }
+            )
+            return None
+
+        url = f"{GITHUB_API}/repos/{owner}/{repo}/contents/{path}"
+        resp = self._ensure_http().get(
+            url, headers=self._auth_headers(), params={"ref": ref}
+        )
+        self.calls.append(
+            {"method": "GET", "path": url, "ref": ref, "status": resp.status_code}
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            return None  # directory
+        content = data.get("content")
+        encoding = data.get("encoding")
+        if content and encoding == "base64":
+            raw = base64.b64decode(content.replace("\n", ""))
+            return raw.decode("utf-8")
+        if isinstance(content, str):
+            return content
+        # raw download_url fallback
+        download = data.get("download_url")
+        if download:
+            r2 = self._ensure_http().get(download, headers=self._auth_headers())
+            r2.raise_for_status()
+            return r2.text
+        return None
 
     def list_pr_files(self, owner: str, repo: str, pr_number: int) -> list[dict[str, Any]]:
         """GET /repos/{owner}/{repo}/pulls/{n}/files with pagination + truncation."""
@@ -207,3 +313,15 @@ class GitHubClient:
         self.calls.append({"method": "PATCH", "path": url, "status": resp.status_code})
         resp.raise_for_status()
         return resp.json()
+
+    def delete_issue_comment(self, owner: str, repo: str, comment_id: int) -> None:
+        path = f"/repos/{owner}/{repo}/issues/comments/{comment_id}"
+        if self._should_use_fixtures:
+            logger.info("delete_issue_comment mocked (fixture mode) id=%s", comment_id)
+            self.calls.append({"method": "DELETE", "path": path, "fixture": True})
+            return
+
+        url = f"{GITHUB_API}{path}"
+        resp = self._ensure_http().delete(url, headers=self._auth_headers())
+        self.calls.append({"method": "DELETE", "path": url, "status": resp.status_code})
+        resp.raise_for_status()

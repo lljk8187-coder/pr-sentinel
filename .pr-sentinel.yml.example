@@ -1,0 +1,25 @@
+# Example `.pr-sentinel.yml` — place on the repository **default branch**.
+# PR branches' copies are ignored; worker always reads default branch.
+version: 1
+summary_comment: true
+update_strategy: update   # update | recreate | skip_if_exists
+ignore_paths:
+  - "docs/**"
+  - "**/*.md"
+diff:
+  max_pages: 5
+  per_page: 100
+  max_files: 300
+rules:
+  secrets:
+    enabled: true
+    patterns:
+      - "AKIA[0-9A-Z]{16}"
+      - "-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----"
+  large_files:
+    enabled: true
+    max_bytes: 1048576
+  weakened_tests:
+    enabled: true
+analyzer:
+  mode: rules   # fake | rules
