@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **M5（Phase2）**：Webhook HMAC 验签 → Delivery 去重 → **arq** 入队 → **Jobs 存 Postgres** → Worker 规则(+可选 LLM) → Sticky Comment + **最小 Web 控制台**（任务列表 / 失败重试）。
+GitHub PR 质量闸门 — **M6**：在 M5（Webhook → arq → Jobs/Postgres → Sticky + 控制台）之上收紧规则启发式：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节 / additions / binary 扩展名启发（不调 Contents API）。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -67,9 +67,9 @@ tests/
 | 字段 | 说明 |
 | --- | --- |
 | `update_strategy` | `update`（默认 PATCH）/ `recreate`（删旧再 POST）/ `skip_if_exists` |
-| `ignore_paths` | glob，匹配文件不进入规则扫描 |
+| `ignore_paths` | gitignore 风格（**pathspec.GitIgnoreSpec**）：`**`、目录前缀、取反 `!`；匹配文件不进入规则扫描 |
 | `rules.secrets` | patch/文件名正则 |
-| `rules.large_files` | 按 patch 长度 / additions 启发式 |
+| `rules.large_files` | `max_bytes`（patch 字节）、`max_additions`、`binary_extensions`；无 patch 且高 changes/二进制扩展 → `binary_or_truncated`（不臆造真实 size） |
 | `rules.weakened_tests` | 删除测试文件或 assert 净减少 |
 | `privacy.redact_secrets` | 送入 LLM 前对文本做密钥 redact（`***REDACTED***`） |
 | `llm.enabled` | 是否启用 LLM（仍需 API Key） |
@@ -213,6 +213,13 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - `packages/common/job_store.py` 使用 **asyncpg**；`DATABASE_URL` 见 [`.env.example`](./.env.example)。
 - Redis **仅**保留 delivery 去重 + arq；**禁止**再写 `pr-sentinel:job:*`。
 - 不做多租户 / Alembic / ORM；不用 PG 替 arq。
+
+## Phase2 M6：gitignore ignore_paths + large_files
+
+- `ignore_paths`：`pathspec.GitIgnoreSpec`（或等价 `PathSpec.from_lines('gitwildmatch', …)`），覆盖目录前缀、`**`、取反 `!`。
+- `large_files`：patch 字节 ≥ `max_bytes`、additions ≥ `max_additions`、或无 patch 且（高 changes / 命中 `binary_extensions`）→ finding；meta 含 `reason` / `approx_patch_bytes` / `additions` / `binary_or_truncated`。
+- **不做** Contents API 拉文件、不臆造真实文件 size；小文本不误报。
+- 依赖：`pathspec`（见 `requirements.txt` / `pyproject.toml`）。
 
 ## 测试
 

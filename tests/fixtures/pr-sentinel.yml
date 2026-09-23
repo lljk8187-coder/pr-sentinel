@@ -14,6 +14,7 @@ rules:
   large_files:
     enabled: true
     max_bytes: 500
+    max_additions: 2000
   weakened_tests:
     enabled: true
 analyzer:

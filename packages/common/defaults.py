@@ -29,7 +29,24 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "large_files": {
             "enabled": True,
-            "max_bytes": 1048576,
+            "max_bytes": 1048576,  # patch byte threshold
+            "max_additions": 2000,
+            "binary_extensions": [
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".webp",
+                ".pdf",
+                ".zip",
+                ".gz",
+                ".whl",
+                ".exe",
+                ".dll",
+                ".so",
+                ".dylib",
+                ".bin",
+            ],
         },
         "weakened_tests": {
             "enabled": True,

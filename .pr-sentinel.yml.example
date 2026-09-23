@@ -18,7 +18,9 @@ rules:
       - "-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----"
   large_files:
     enabled: true
-    max_bytes: 1048576
+    max_bytes: 1048576      # patch 字节阈值
+    max_additions: 2000
+    binary_extensions: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".whl", ".exe", ".dll", ".so", ".dylib", ".bin"]
   weakened_tests:
     enabled: true
 privacy:

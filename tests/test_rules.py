@@ -25,12 +25,12 @@ def test_secrets_rule_detects_akia():
     assert findings[0].severity == "error"
 
 
-def test_large_files_rule():
+def test_large_files_patch_too_large():
     cfg = get_default_config()
     cfg["rules"]["large_files"]["max_bytes"] = 100
     files = [
         {
-            "filename": "blob.bin",
+            "filename": "blob.txt",
             "additions": 50,
             "deletions": 0,
             "changes": 50,
@@ -40,6 +40,60 @@ def test_large_files_rule():
     findings = LargeFilesRule().check(files, cfg)
     assert len(findings) == 1
     assert findings[0].rule_id == "large_files"
+    assert "patch_too_large" in findings[0].meta["reason"]
+    assert findings[0].meta["approx_patch_bytes"] >= 100
+    assert findings[0].meta["binary_or_truncated"] is False
+
+
+def test_large_files_additions_too_high():
+    cfg = get_default_config()
+    cfg["rules"]["large_files"]["max_bytes"] = 10_000_000
+    cfg["rules"]["large_files"]["max_additions"] = 100
+    files = [
+        {
+            "filename": "big.py",
+            "additions": 250,
+            "deletions": 0,
+            "changes": 250,
+            "patch": "+line\n" * 10,  # small patch text, high additions count
+        }
+    ]
+    findings = LargeFilesRule().check(files, cfg)
+    assert len(findings) == 1
+    assert "additions_too_high" in findings[0].meta["reason"]
+    assert findings[0].meta["additions"] == 250
+
+
+def test_large_files_binary_or_truncated_no_patch():
+    cfg = get_default_config()
+    files = [
+        {
+            "filename": "assets/logo.png",
+            "additions": 0,
+            "deletions": 0,
+            "changes": 0,
+            "patch": None,
+        }
+    ]
+    findings = LargeFilesRule().check(files, cfg)
+    assert len(findings) == 1
+    assert findings[0].meta["binary_or_truncated"] is True
+    assert "binary_or_truncated" in findings[0].meta["reason"]
+
+
+def test_large_files_small_text_passes():
+    cfg = get_default_config()
+    files = [
+        {
+            "filename": "src/hello.py",
+            "additions": 3,
+            "deletions": 0,
+            "changes": 3,
+            "patch": "@@ -0,0 +1,3 @@\n+a\n+b\n+c\n",
+        }
+    ]
+    findings = LargeFilesRule().check(files, cfg)
+    assert findings == []
 
 
 def test_weakened_tests_deleted_file():
@@ -85,6 +139,34 @@ def test_ignore_paths_filters_md():
     assert "src/app.py" in names_kept
     assert "README.md" in names_ign
     assert "docs/guide.txt" in names_ign
+
+
+def test_ignore_paths_directory_prefix():
+    from pr_sentinel_github.rules.ignore_paths import is_ignored
+
+    patterns = ["vendor/**", "build/"]
+    assert is_ignored("vendor/pkg/a.py", patterns)
+    assert is_ignored("build/out.o", patterns)
+    assert not is_ignored("src/vendor_like.py", patterns)
+
+
+def test_ignore_paths_glob_starstar():
+    from pr_sentinel_github.rules.ignore_paths import is_ignored
+
+    patterns = ["**/*.generated.ts", "**/fixtures/**"]
+    assert is_ignored("api/types.generated.ts", patterns)
+    assert is_ignored("pkg/fixtures/sample.json", patterns)
+    assert not is_ignored("api/types.ts", patterns)
+
+
+def test_ignore_paths_negation():
+    from pr_sentinel_github.rules.ignore_paths import is_ignored
+
+    patterns = ["**/*.md", "!README.md", "!docs/KEEP.md"]
+    assert is_ignored("notes.md", patterns)
+    assert not is_ignored("README.md", patterns)
+    assert not is_ignored("docs/KEEP.md", patterns)
+    assert is_ignored("docs/other.md", patterns)
 
 
 def test_engine_skips_ignored_for_secrets():
