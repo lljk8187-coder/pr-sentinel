@@ -189,6 +189,7 @@ def process_job(job: dict[str, Any], settings: Settings | None = None) -> dict[s
                 pr_number=pr_number,
                 head_sha=head_sha,
                 findings=findings,
+                files=files,
             )
 
         return out

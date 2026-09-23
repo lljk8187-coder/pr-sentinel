@@ -55,6 +55,8 @@ class GitHubClient:
         self.truncated: bool = False
         self._installation_token: str | None = None
         self._installation_token_for: int | None = None
+        # Fixture-mode store for inline review comments (upsert tests).
+        self._pull_review_comments: list[dict[str, Any]] = []
 
     def _ensure_http(self) -> httpx.Client:
         if self._http is None:
@@ -110,7 +112,7 @@ class GitHubClient:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "pr-sentinel/0.2",
+            "User-Agent": "pr-sentinel/0.9",
         }
         bearer = self._resolve_bearer()
         if bearer:
@@ -443,13 +445,7 @@ class GitHubClient:
         }
 
         if self._should_use_fixtures:
-            n = sum(
-                1
-                for c in self.calls
-                if c.get("method") == "POST"
-                and "/pulls/" in c.get("path", "")
-                and c.get("path", "").endswith("/comments")
-            )
+            n = len(self._pull_review_comments)
             cid = 7001 + n
             result = {
                 "id": cid,
@@ -458,8 +454,10 @@ class GitHubClient:
                 "line": line,
                 "commit_id": commit_id,
                 "side": side,
+                "pull_request_url": f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
                 "html_url": f"https://github.com/{owner}/{repo}/pull/{pr_number}#discussion_r{cid}",
             }
+            self._pull_review_comments.append(dict(result))
             self.calls.append(
                 {
                     "method": "POST",
@@ -475,6 +473,90 @@ class GitHubClient:
         url = f"{GITHUB_API}{api_path}"
         resp = self._ensure_http().post(url, headers=self._auth_headers(), json=payload)
         self.calls.append({"method": "POST", "path": url, "status": resp.status_code})
+        resp.raise_for_status()
+        return resp.json()
+
+    def list_pull_review_comments(
+        self, owner: str, repo: str, pr_number: int
+    ) -> list[dict[str, Any]]:
+        """GET /repos/{owner}/{repo}/pulls/{pr_number}/comments"""
+        api_path = f"/repos/{owner}/{repo}/pulls/{pr_number}/comments"
+        if self._should_use_fixtures:
+            # Prefer in-memory POSTed/PATCHed comments so upsert tests work offline.
+            data = [dict(c) for c in self._pull_review_comments]
+            fixture_file = self.fixtures_dir / "pull_review_comments.json"
+            if not data and fixture_file.exists():
+                data = json.loads(fixture_file.read_text(encoding="utf-8"))
+                if not isinstance(data, list):
+                    data = []
+            self.calls.append(
+                {
+                    "method": "GET",
+                    "path": api_path,
+                    "fixture": True,
+                    "count": len(data),
+                }
+            )
+            return data
+
+        http = self._ensure_http()
+        headers = self._auth_headers()
+        all_comments: list[dict[str, Any]] = []
+        for page in range(1, self.max_pages + 1):
+            url = f"{GITHUB_API}{api_path}"
+            params = {"per_page": self.per_page, "page": page}
+            resp = http.get(url, headers=headers, params=params)
+            self.calls.append(
+                {"method": "GET", "path": url, "page": page, "status": resp.status_code}
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            if not isinstance(batch, list):
+                break
+            all_comments.extend(batch)
+            if len(batch) < self.per_page:
+                break
+        return all_comments
+
+    def update_pull_review_comment(
+        self,
+        owner: str,
+        repo: str,
+        comment_id: int,
+        *,
+        body: str,
+    ) -> dict[str, Any]:
+        """PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id} — body only."""
+        api_path = f"/repos/{owner}/{repo}/pulls/comments/{comment_id}"
+        payload = {"body": body}
+
+        if self._should_use_fixtures:
+            result: dict[str, Any] | None = None
+            for stored in self._pull_review_comments:
+                if int(stored.get("id", -1)) == int(comment_id):
+                    stored["body"] = body
+                    result = dict(stored)
+                    break
+            if result is None:
+                result = {"id": comment_id, "body": body}
+                self._pull_review_comments.append(dict(result))
+            self.calls.append(
+                {
+                    "method": "PATCH",
+                    "path": api_path,
+                    "payload": payload,
+                    "body": body,
+                    "fixture": True,
+                    "result": result,
+                }
+            )
+            return result
+
+        url = f"{GITHUB_API}{api_path}"
+        resp = self._ensure_http().patch(
+            url, headers=self._auth_headers(), json=payload
+        )
+        self.calls.append({"method": "PATCH", "path": url, "status": resp.status_code})
         resp.raise_for_status()
         return resp.json()
 

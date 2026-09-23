@@ -1,4 +1,4 @@
-"""M8: Check Run conclusion/annotations + inline comments + worker wiring."""
+"""M8/M11: Check Run + high-severity inline upsert (RIGHT line + fingerprint)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pr_sentinel_github.check_runs import (
 )
 from pr_sentinel_github.client import GitHubClient
 from pr_sentinel_github.rules.base import Finding
-from pr_sentinel_github.rules.patch_lines import patch_offset_to_new_line
+from pr_sentinel_github.rules.patch_lines import line_in_patch_right, patch_offset_to_new_line
 from pr_sentinel_github.rules.secrets import SecretsRule
 
 SHA = "deadbeefcafebabe000011112222333344445555"
@@ -91,16 +91,26 @@ def test_annotations_skip_missing_path_or_line():
     assert annos[0]["annotation_level"] == "failure"
 
 
+def _patch_with_lines(n: int) -> str:
+    """Minimal unified diff whose RIGHT side includes lines 1..n."""
+    body = "".join(f"+line{i}\n" for i in range(1, n + 1))
+    return f"@@ -0,0 +1,{n} @@\n{body}"
+
+
 def test_inline_only_high_with_line(tmp_path: Path):
     (tmp_path / "pr_files.json").write_text("[]")
     (tmp_path / "issue_comments.json").write_text("[]")
     client = GitHubClient(use_fixtures=True, fixtures_dir=tmp_path)
     findings = [
         _f(severity="warning", filename="a.py", line=1, message="warn"),
-        _f(severity="high", filename="b.py", line=2, message="hi"),
+        _f(severity="high", filename="b.py", line=2, message="hi", rule_id="r-hi"),
         _f(severity="error", filename="c.py", line=None, message="no-line"),
-        _f(severity="critical", filename="d.py", line=4, message="crit"),
+        _f(severity="critical", filename="d.py", line=4, message="crit", rule_id="r-crit"),
         _f(severity="info", filename="e.py", line=5, message="info"),
+    ]
+    files = [
+        {"filename": "b.py", "patch": _patch_with_lines(3)},
+        {"filename": "d.py", "patch": _patch_with_lines(5)},
     ]
     results = publish_inline_comments(
         client,
@@ -109,6 +119,7 @@ def test_inline_only_high_with_line(tmp_path: Path):
         pr_number=7,
         head_sha=SHA,
         findings=findings,
+        files=files,
     )
     assert len(results) == 2
     assert {r["path"] for r in results} == {"b.py", "d.py"}
@@ -120,6 +131,149 @@ def test_inline_only_high_with_line(tmp_path: Path):
         and str(c.get("path", "")).endswith("/comments")
     ]
     assert len(posts) == 2
+    for p in posts:
+        assert p["payload"]["side"] == "RIGHT"
+        assert "position" not in p["payload"]
+        assert p["payload"]["body"].startswith("<!-- pr-sentinel:inline:")
+
+
+def test_inline_skips_deletion_and_missing_line(tmp_path: Path):
+    (tmp_path / "pr_files.json").write_text("[]")
+    client = GitHubClient(use_fixtures=True, fixtures_dir=tmp_path)
+    # RIGHT has only line 1 (+); line 2 is a deletion-only old line — not on RIGHT.
+    deletion_patch = "@@ -1,2 +1,1 @@\n context\n-deleted\n"
+    findings = [
+        _f(severity="error", filename="gone.py", line=2, message="on-deleted", rule_id="del"),
+        _f(severity="error", filename="gone.py", line=None, message="no-line", rule_id="nl"),
+        _f(severity="high", filename="gone.py", line=0, message="zero", rule_id="z"),
+        _f(severity="critical", filename=None, line=1, message="no-path", rule_id="np"),
+    ]
+    results = publish_inline_comments(
+        client,
+        owner="acme",
+        repo="demo",
+        pr_number=1,
+        head_sha=SHA,
+        findings=findings,
+        files=[{"filename": "gone.py", "patch": deletion_patch}],
+    )
+    assert results == []
+    posts = [c for c in client.calls if c["method"] == "POST" and str(c.get("path", "")).endswith("/comments")]
+    assert posts == []
+
+
+def test_inline_upsert_same_fingerprint_no_second_post(tmp_path: Path):
+    (tmp_path / "pr_files.json").write_text("[]")
+    client = GitHubClient(use_fixtures=True, fixtures_dir=tmp_path)
+    files = [{"filename": "b.py", "patch": _patch_with_lines(3)}]
+    findings = [
+        _f(severity="high", filename="b.py", line=2, message="hi", rule_id="secrets"),
+    ]
+    r1 = publish_inline_comments(
+        client,
+        owner="acme",
+        repo="demo",
+        pr_number=7,
+        head_sha=SHA,
+        findings=findings,
+        files=files,
+    )
+    assert len(r1) == 1
+    posts_after_first = [
+        c
+        for c in client.calls
+        if c["method"] == "POST" and str(c.get("path", "")).endswith("/comments")
+    ]
+    assert len(posts_after_first) == 1
+
+    # Second run: same fingerprint → PATCH or skip, not another POST
+    findings2 = [
+        _f(severity="high", filename="b.py", line=2, message="hi updated", rule_id="secrets"),
+    ]
+    r2 = publish_inline_comments(
+        client,
+        owner="acme",
+        repo="demo",
+        pr_number=7,
+        head_sha=SHA,
+        findings=findings2,
+        files=files,
+    )
+    assert len(r2) == 1
+    posts_total = [
+        c
+        for c in client.calls
+        if c["method"] == "POST" and str(c.get("path", "")).endswith("/comments")
+    ]
+    patches = [
+        c
+        for c in client.calls
+        if c["method"] == "PATCH" and "/pulls/comments/" in str(c.get("path", ""))
+    ]
+    assert len(posts_total) == 1
+    assert len(patches) == 1
+    assert len(client.list_pull_review_comments("acme", "demo", 7)) == 1
+
+    # Third run identical body → skip (still one comment, no extra PATCH required)
+    calls_before = len(client.calls)
+    r3 = publish_inline_comments(
+        client,
+        owner="acme",
+        repo="demo",
+        pr_number=7,
+        head_sha=SHA,
+        findings=findings2,
+        files=files,
+    )
+    assert len(r3) == 1
+    posts_total = [
+        c
+        for c in client.calls
+        if c["method"] == "POST" and str(c.get("path", "")).endswith("/comments")
+    ]
+    assert len(posts_total) == 1
+    assert len(client.list_pull_review_comments("acme", "demo", 7)) == 1
+    # list was called; no new POST/PATCH for body
+    new_writes = [
+        c
+        for c in client.calls[calls_before:]
+        if c["method"] in {"POST", "PATCH"}
+        and "comments" in str(c.get("path", ""))
+        and "check-runs" not in str(c.get("path", ""))
+    ]
+    assert new_writes == []
+
+
+def test_inline_fake_line_not_in_right_patch(tmp_path: Path):
+    (tmp_path / "pr_files.json").write_text("[]")
+    client = GitHubClient(use_fixtures=True, fixtures_dir=tmp_path)
+    files = [{"filename": "b.py", "patch": _patch_with_lines(2)}]  # lines 1-2 only
+    findings = [
+        _f(severity="error", filename="b.py", line=99, message="invented", rule_id="llm"),
+    ]
+    results = publish_inline_comments(
+        client,
+        owner="acme",
+        repo="demo",
+        pr_number=3,
+        head_sha=SHA,
+        findings=findings,
+        files=files,
+    )
+    assert results == []
+    posts = [c for c in client.calls if c["method"] == "POST" and str(c.get("path", "")).endswith("/comments")]
+    assert posts == []
+
+
+def test_line_in_patch_right_helper():
+    patch = "@@ -1,2 +1,2 @@\n context\n-old\n+new\n"
+    assert line_in_patch_right(patch, 1) is True  # context
+    assert line_in_patch_right(patch, 2) is True  # +new
+    assert line_in_patch_right(patch, 3) is False
+    assert line_in_patch_right(patch, 99) is False
+    assert line_in_patch_right("", 1) is False
+    del_only = "@@ -1,1 +0,0 @@\n-gone\n"
+    assert line_in_patch_right(del_only, 1) is False
 
 
 def test_publish_check_run_fixture_calls(tmp_path: Path):

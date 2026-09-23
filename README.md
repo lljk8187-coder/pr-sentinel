@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **Phase2 收口（M9 / 0.9.0）**：任务成功后 findings / report_md / check_run_id 写回 Postgres；`GET /jobs/{id}` 与控制台详情页。M8：GitHub Check Run（annotations）+ 高危 inline comments。M7：GitHub Actions CI（Postgres service + pytest）。M6：`ignore_paths` 用 **pathspec/gitignore**，`large_files` 按 patch 字节启发。
+GitHub PR 质量闸门 — **Phase3 M11**：高危 inline review comments 按新文件 RIGHT 行号 + fingerprint upsert（同步不重复 POST）。Phase2（M9 / 0.9.0）：findings / report_md / check_run_id 写回 Postgres；`GET /jobs/{id}`。M8：Check Run annotations。M7：CI。M6：`ignore_paths` pathspec。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -241,6 +241,13 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **Inline comments**：仅对高危（high|critical|error）且有 path+line 的 findings；无 line 只进 Check Run/sticky，不臆造行号。
 - `summary_comment=false` 时跳过 sticky，但仍写 Check Run（除非 `check_run=false`）。
 - 默认：`check_run: true`、`inline_comments: true`。
+
+## Phase3 M11：Inline RIGHT 行号 + fingerprint upsert
+
+- Inline review comment 使用新文件 **RIGHT** 1-based `line` + `side=RIGHT`（不用 `position`）。
+- 无行号 / 删除行 / 二进制无 patch / 臆造不在 RIGHT patch 中的行 → **跳过** POST，避免 GitHub 422 拖垮整 job。
+- Body 首行 fingerprint：`<!-- pr-sentinel:inline:{path}:{line}:{rule_id} -->`；synchronize 时同 fingerprint → PATCH body（或内容未变则 skip），不盲 POST 重复。
+- Worker 把 PR files/patch 传入 `publish_inline_comments` 做 `line_in_patch_right` 校验。
 
 ## Phase2 M9：Job detail + findings 写回
 

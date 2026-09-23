@@ -1,4 +1,4 @@
-"""Map unified-diff character offsets to new-file line numbers."""
+"""Map unified-diff character offsets / lines to new-file (RIGHT) line numbers."""
 
 from __future__ import annotations
 
@@ -46,3 +46,38 @@ def patch_offset_to_new_line(patch: str, char_offset: int) -> int | None:
 
         pos = end
     return None
+
+
+def line_in_patch_right(patch: str, line: int) -> bool:
+    """True iff ``line`` appears as a RIGHT-side line in the unified diff.
+
+    RIGHT-side lines are additions (``+``) and context (`` ``) under hunks.
+    Deleted (``-``) lines and hunk headers are never RIGHT.
+    """
+    if not patch or line is None:
+        return False
+    try:
+        target = int(line)
+    except (TypeError, ValueError):
+        return False
+    if target < 1:
+        return False
+
+    next_new: int | None = None
+    for raw in patch.splitlines():
+        stripped = raw.rstrip("\r\n")
+        if stripped.startswith("@@"):
+            m = _HUNK_RE.match(stripped)
+            if m:
+                next_new = int(m.group(1))
+            continue
+        if stripped.startswith("\\"):
+            continue
+        if stripped.startswith("+") or stripped.startswith(" "):
+            if next_new is not None and next_new == target:
+                return True
+            if next_new is not None:
+                next_new += 1
+        elif stripped.startswith("-"):
+            continue
+    return False
