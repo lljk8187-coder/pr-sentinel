@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **0.10.0 / Phase4** 发布卫生：M14 出站脱敏（Check Run / sticky / inline）、M16 Worker 瞬态重试耗尽标 failed、M15 compose restart/health + `.env.example` 必填变量、M17 版本对齐与 CHANGELOG。Phase3（M13）：`check_run_url`、结构化日志、`GET /metrics`。Phase2（M9）：findings 写回 Postgres。
+GitHub PR 质量闸门 — **1.0.0 / Phase5** 就绪：M18 live fail-fast、M19 无真 App smoke 脚手架、M20 控制台 ops UX、M21 版本对齐。真 App E2E **可选**（非硬门禁）。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。Phase3（M13）：`check_run_url`、结构化日志、`GET /metrics`。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -292,12 +292,13 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **指标**：`/console` 按当前列表任务的 `status` 聚合计数；可选 `GET /metrics` 返回进程内计数（无 prometheus）。
 
 
-## Phase5 M19：无真 App 文档 / smoke 脚手架
+## Phase5（1.0.0）：就绪发布
 
-- 修正 e2e 文档中过时的 Redis jobs LIST 表述（jobs → **Postgres**）。
-- README 明确 **无真 App smoke** 步骤；可选 `scripts/smoke_fixtures_webhook.py`。
-- Compose `GITHUB_APP_PRIVATE_KEY_PATH` + 注释 PEM volume（M18 已就绪，本里程碑仅核对）。
-- **不做** M20/M21、不强制真 App E2E。
+- **M18**：`USE_FIXTURES=false` 时缺 App/PAT 凭证 **fail-fast**（不再静默回落 fixtures）。
+- **M19**：无真 App smoke 脚手架 — e2e 文档修正（jobs → Postgres）；可选 `scripts/smoke_fixtures_webhook.py`；Compose PEM path 核对。
+- **M20**：控制台 ops UX — failed 行高亮、error 截断、`?status=` 过滤。
+- **M21**：版本对齐 **1.0.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.0`。
+- **Notes**：真 GitHub App / live E2E **可选**，不是 1.0.0 硬门禁。
 
 ## Phase4（0.10.0）：发布卫生
 

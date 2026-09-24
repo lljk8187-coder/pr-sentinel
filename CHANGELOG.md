@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-24
+
+Phase5 readiness release. **Notes:** real GitHub App / live E2E is **optional**, not a hard gate for 1.0.0.
+
 ### Added
-- **M19**: Docs + env/compose scaffolding for **无真 App smoke** (fixtures + HMAC webhook → 202 → `/console` from Postgres); optional `scripts/smoke_fixtures_webhook.py` (stdlib).
+- **M18**: Live mode (`USE_FIXTURES=false`) **fail-fast** when App/PAT credentials are missing (no silent fixtures fallback).
+- **M19**: Fixtures smoke scaffold — docs + env/compose for **无真 App smoke** (HMAC webhook → 202 → `/console` from Postgres); optional `scripts/smoke_fixtures_webhook.py`.
+- **M20**: Console ops UX — failed-row highlight, error truncate, `?status=` filter.
+- **M21**: Version alignment to **1.0.0** across `pyproject.toml`, FastAPI `version`, GitHub `User-Agent` (`pr-sentinel/1.0`), README, and this changelog.
 
 ### Changed
 - **M19**: `docs/e2e-demo.md` — jobs archive is Postgres (removed outdated Redis `pr-sentinel:jobs` LIST wording); real App / smee kept optional.
