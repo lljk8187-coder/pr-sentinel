@@ -63,3 +63,7 @@ jobs:
 
       - name: Run pytest
         run: pytest -q
+
+      - name: Golden score (informational)
+        continue-on-error: true
+        run: python scripts/golden_score.py

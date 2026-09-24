@@ -1,4 +1,4 @@
-"""M41: golden_score.py runs and prints recall / soft_ok (stdlib subprocess)."""
+"""M41/M44: golden_score.py summary + --help (stdlib subprocess)."""
 
 from __future__ import annotations
 
@@ -26,3 +26,21 @@ def test_golden_score_script_exits_zero_and_prints_summary():
     assert "must_not FP" in out
     assert "soft_ok" in out
     assert "[rules]" in out and "[llm]" in out
+
+
+def test_golden_score_help_exits_zero_without_scoring():
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        cwd=ROOT,
+        env={**os.environ},
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    help_text = proc.stdout + proc.stderr
+    assert "usage" in help_text.lower()
+    # Help/description may mention metrics; scoring body must not run.
+    assert "[rules]" not in help_text
+    assert "golden root:" not in help_text
+    assert "soft_ok:" not in help_text
