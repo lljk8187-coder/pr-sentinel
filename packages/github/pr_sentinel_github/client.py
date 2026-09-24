@@ -113,7 +113,7 @@ class GitHubClient:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "pr-sentinel/1.4",
+            "User-Agent": "pr-sentinel/1.5",
         }
         bearer = self._resolve_bearer()
         if bearer:

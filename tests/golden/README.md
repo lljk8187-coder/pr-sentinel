@@ -1,7 +1,7 @@
 # Golden 抽样用例（Phase10）
 
 本目录存放规则 / LLM 的可复现抽样 case，供后续里程碑做回归与 score（M39+）。
-**M38 只提供目录、loader 与烟测**；不在此塞满规则样本，也不打真 OpenAI。
+M38 起提供目录、loader 与烟测；M39/M40 填入 rules/llm 样本；汇总分数见仓库根 `scripts/golden_score.py`（M41，默认不因分数失败）。
 
 ## 布局
 

@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **1.4.0 / Phase9**：真 App 就绪文档收口（M34 权限/PEM/installation_id/HMAC FAQ；M35 `preflight_live.py`；M36 `docs/records` 证据模板；M37 版本对齐）。真 App E2E **可选**（非硬门禁）。Phase8（1.3.0）：输出与控制台。Phase7（1.2.0）：分析质量。Phase6（1.1.0）：webhook 限流/体长 / 嵌套配置 / TestClient 消噪。Phase5（1.0.0）：live fail-fast / smoke 脚手架 / console ops。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。
+GitHub PR 质量闸门 — **1.5.0 / Phase10**：golden 抽样与 score（M38 loader；M39 规则样本；M40 LLM 解析样本；M41 `golden_score.py` + 版本对齐）。真 App E2E **可选**（非硬门禁）。Phase9（1.4.0）：真 App 就绪文档。Phase8（1.3.0）：输出与控制台。Phase7（1.2.0）：分析质量。Phase6（1.1.0）：webhook 限流/体长 / 嵌套配置 / TestClient 消噪。Phase5（1.0.0）：live fail-fast / smoke 脚手架 / console ops。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -311,6 +311,14 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **M24**：webhook Content-Length/body 超限 → 413（默认 1MiB）；Redis INCR+EXPIRE 限流 → 429（默认 120/60s）；顺序限流→体长→HMAC；无 slowapi。
 - **M25**：版本对齐 **1.1.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.1`。
 - **Notes**：真 GitHub App / live E2E **可选**，不是 1.1.0 硬门禁。
+
+## Phase10（1.5.0）：golden 抽样与 score
+
+- **M38**：`tests/golden/` 目录 + `load_case` + README 契约 + 烟测。
+- **M39**：五类规则各 ≥1 正例 / 反例 JSON + 参数化 `test_golden_rules.py`。
+- **M40**：LLM 解析 golden（valid / soft / empty / fenced）+ `test_golden_llm.py`（无真 OpenAI）。
+- **M41**：`scripts/golden_score.py` 打印 must_hit recall / must_not FP / soft_ok（默认不因分数非零退出）；版本对齐 **1.5.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.5`（子包 `pr-sentinel-github` 仍 0.2.0；smoke UA `pr-sentinel-smoke/0.1` 未动）。
+- **Notes**：真 GitHub App / live E2E **可选**，不是 1.5.0 硬门禁。
 
 ## Phase9（1.4.0）：真 App 就绪文档
 

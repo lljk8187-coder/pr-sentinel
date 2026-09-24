@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-09-24
+
+Phase10 golden-sampling release (loader / rules+llm goldens / score). **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
+
+### Added
+- **M38**: Golden infra — `tests/golden/{rules,llm}`, `load_case` JSON loader, README contract, smoke tests.
+- **M39**: Rules golden samples (≥1 must_hit + ≥1 must_not per built-in rule) + parameterized `test_golden_rules.py`.
+- **M40**: LLM parse goldens (valid / soft / empty / fenced) exercising `_parse_llm_findings` without live OpenAI.
+- **M41**: `scripts/golden_score.py` — recall / must_not FP / LLM soft_ok summary (informational exit 0); version alignment to **1.5.0** (`pyproject.toml`, FastAPI `version`, User-Agent `pr-sentinel/1.5`, README, this changelog). Subpackage `pr-sentinel-github` stays **0.2.0**; smoke UA `pr-sentinel-smoke/0.1` unchanged.
+
 ## [1.4.0] — 2026-09-24
 
 Phase9 live-readiness release (docs / preflight / evidence templates). **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
