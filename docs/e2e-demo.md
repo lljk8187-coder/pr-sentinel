@@ -164,6 +164,22 @@ python scripts/smoke_fixtures_webhook.py
 
 ---
 
+## Live 预检（M35）
+
+开真实 PR / 打真网之前，先跑本地静态预检（**不**调 GitHub API、**不**签发 JWT）：
+
+```bash
+# 建议先准备 .env（USE_FIXTURES=false + App 或 PAT），或 export 同名变量
+python scripts/preflight_live.py
+# 可选：PREFLIGHT_HEALTH_URL=http://127.0.0.1:8000/health
+#       PREFLIGHT_SKIP_HEALTH=1
+```
+
+- **exit 0**：无 FAIL（允许 WARN，例如 API 未启动时 `/health` 不通）
+- **exit 1**：配置未就绪（如仍 `USE_FIXTURES=true`、缺 App/PAT、PEM 路径不可读）
+
+通过后再按上文启动 compose / smee 并开 PR。
+
 ## Live FAQ（`USE_FIXTURES=false`）
 
 | 现象 | 说明 / 排查 |

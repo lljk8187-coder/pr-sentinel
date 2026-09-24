@@ -36,6 +36,7 @@ packages/github/          GitHub 客户端 + 规则 + llm + sticky
 sql/001_jobs.sql          Postgres jobs 表（compose initdb）
 docs/e2e-demo.md          端到端演示（含可选真 App；默认无真 App）
 scripts/smoke_fixtures_webhook.py  无真 App HMAC webhook smoke（stdlib）
+scripts/preflight_live.py         live 预检（stdlib；不调 GitHub API）
 deploy/docker-compose.yml
 tests/
 ```
@@ -118,6 +119,7 @@ tests/
 | **控制台 API** | `ADMIN_TOKEN` + Bearer / `X-Admin-Token` |
 
 真 App 步骤（**Checks: Read & write**、PEM 两路径、`installation_id`、HMAC/smee FAQ）：[docs/e2e-demo.md](./docs/e2e-demo.md#可选真-app)。
+开 PR 前可跑 live 预检：`python scripts/preflight_live.py`（exit 0=无 FAIL；详见 [docs/e2e-demo.md](./docs/e2e-demo.md#live-预检m35)）。
 
 ## 本地 Webhook：smee + HMAC
 
