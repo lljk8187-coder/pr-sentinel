@@ -17,10 +17,19 @@
     .status-running { color: #0b5fff; }
     .status-success { color: #0a7a2f; }
     .status-failed { color: #b00020; font-weight: 600; }
+    tr.row-failed { background: #fde8ea; }
+    tr.row-failed:hover { background: #fcd4d8; }
     code, pre { background: #f0f2f5; border-radius: 4px; }
     code { padding: 0.1rem 0.3rem; font-size: 0.85em; }
     pre { padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; }
     .err { color: #b00020; font-size: 0.85em; }
+    .err-truncate {
+      max-width: 22rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: help;
+    }
     .muted { color: #666; font-size: 0.85rem; }
     .token-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
     input[type=password], input[type=text] { padding: 0.35rem 0.5rem; min-width: 220px; }
@@ -30,11 +39,15 @@
     .flash-ok { background: #e6f6ea; border: 1px solid #8fd19e; }
     .flash-err { background: #fde8ea; border: 1px solid #f0a0a8; }
     ul.steps li { margin: 0.35rem 0; }
+    a.status-link { text-decoration: none; margin-right: 1rem; }
+    a.status-link:hover { text-decoration: underline; }
+    a.status-link.active { text-decoration: underline; font-weight: 700; }
   </style>
 </head>
 <body>
   <h1>PR Sentinel 控制台</h1>
   <p class="muted">M9 任务详情 · 任务列表来自 Postgres · 重试需 <code>ADMIN_TOKEN</code></p>
+  <p class="muted"><code>failed</code> 是任务<strong>状态</strong>；<code>error</code> 是失败时的<strong>消息字段</strong>（不是独立状态值）。可用 <a href="/console?status=failed">?status=failed</a> 筛选失败任务。</p>
   <nav>
     <a href="/console">控制台</a>
     <a href="/">安装说明</a>
@@ -59,20 +72,21 @@
     <h2>状态概览</h2>
     {% if status_counts %}
     <p>
+      <a href="/console" class="status-link{% if not status_filter %} active{% endif %}">全部</a>
       {% for status, n in status_counts.items() %}
-      <span class="status-{{ status }}" style="margin-right:1rem"><strong>{{ status }}</strong>: {{ n }}</span>
+      <a href="/console?status={{ status }}" class="status-link status-{{ status }}{% if status_filter == status %} active{% endif %}"><strong>{{ status }}</strong>: {{ n }}</a>
       {% endfor %}
     </p>
-    <p class="muted">按当前列表任务聚合 · 进程内计数见 <code>GET /metrics</code>（需 ADMIN_TOKEN）</p>
+    <p class="muted">按最近任务聚合 · 点击状态可筛选 · 进程内计数见 <code>GET /metrics</code>（需 ADMIN_TOKEN）</p>
     {% else %}
     <p class="muted">暂无状态统计。</p>
     {% endif %}
   </div>
 
   <div class="card">
-    <h2>最近任务</h2>
+    <h2>最近任务{% if status_filter %} <span class="muted">· 筛选 status=<code>{{ status_filter }}</code></span>{% endif %}</h2>
     {% if not jobs %}
-    <p class="muted">暂无任务。Webhook 成功入队后会出现在这里。</p>
+    <p class="muted">{% if status_filter %}当前筛选下暂无任务。<a href="/console">清除筛选</a>{% else %}暂无任务。Webhook 成功入队后会出现在这里。{% endif %}</p>
     {% else %}
     <table>
       <thead>
@@ -87,8 +101,8 @@
       </thead>
       <tbody>
         {% for j in jobs %}
-        <tr>
-          <td class="status-{{ j.status }}">{{ j.status }}{% if j.error %}<div class="err">{{ j.error }}</div>{% endif %}</td>
+        <tr{% if j.status == 'failed' %} class="row-failed"{% endif %}>
+          <td class="status-{{ j.status }}">{{ j.status }}{% if j.error %}<div class="err err-truncate" title="{{ j.error }}">{{ j.error|truncate(80, True, '…') }}</div>{% endif %}</td>
           <td><a href="/console/jobs/{{ j.id }}">{{ j.owner }}/{{ j.repo }} #{{ j.pr }}</a></td>
           <td><code>{{ (j.sha or '')[:12] }}</code></td>
           <td><code>{{ (j.delivery_id or '')[:16] }}</code></td>
@@ -105,7 +119,7 @@
       </tbody>
     </table>
     {% endif %}
-    <p class="muted"><a href="/console">刷新</a> · API：<code>GET /jobs</code> · <code>GET /jobs/{id}</code>（需 Bearer / X-Admin-Token）</p>
+    <p class="muted"><a href="/console{% if status_filter %}?status={{ status_filter }}{% endif %}">刷新</a> · API：<code>GET /jobs</code> · <code>GET /jobs?status=failed</code> · <code>GET /jobs/{id}</code>（需 Bearer / X-Admin-Token）</p>
   </div>
 
   <div class="card">

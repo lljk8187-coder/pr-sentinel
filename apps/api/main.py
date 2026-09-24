@@ -207,9 +207,17 @@ async def install_page(request: Request) -> HTMLResponse:
 @app.get("/console", response_class=HTMLResponse)
 async def console_page(request: Request) -> HTMLResponse:
     settings = get_settings()
+    raw_status = request.query_params.get("status")
+    status_filter = raw_status.strip() if isinstance(raw_status, str) and raw_status.strip() else None
     jobs: list[dict[str, Any]] = []
+    overview_jobs: list[dict[str, Any]] = []
     try:
-        jobs = await list_jobs(settings.database_url, limit=50)
+        jobs = await list_jobs(settings.database_url, limit=50, status=status_filter)
+        # Overview counts from recent unfiltered list so status links stay useful
+        if status_filter:
+            overview_jobs = await list_jobs(settings.database_url, limit=50)
+        else:
+            overview_jobs = jobs
     except Exception:
         logger.exception("list_jobs for console failed")
     admin_token = request.cookies.get("pr_sentinel_admin_token") or ""
@@ -218,7 +226,7 @@ async def console_page(request: Request) -> HTMLResponse:
         flash = {"kind": "ok", "message": request.query_params.get("ok")}
     if request.query_params.get("err"):
         flash = {"kind": "err", "message": request.query_params.get("err")}
-    status_counts = aggregate_status_counts(jobs)
+    status_counts = aggregate_status_counts(overview_jobs)
     return templates.TemplateResponse(
         request,
         "console.html",
@@ -227,6 +235,7 @@ async def console_page(request: Request) -> HTMLResponse:
             "admin_token": admin_token,
             "flash": flash,
             "status_counts": status_counts,
+            "status_filter": status_filter,
         },
     )
 
@@ -303,11 +312,17 @@ async def get_jobs(
     authorization: str | None = Header(default=None),
     x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
     limit: int = 50,
+    status: str | None = None,
 ) -> dict[str, Any]:
     settings = get_settings()
     require_admin(settings, authorization=authorization, x_admin_token=x_admin_token)
-    jobs = await list_jobs(settings.database_url, limit=min(max(limit, 1), 200))
-    return {"jobs": jobs, "count": len(jobs)}
+    status_filter = status.strip() if isinstance(status, str) and status.strip() else None
+    jobs = await list_jobs(
+        settings.database_url,
+        limit=min(max(limit, 1), 200),
+        status=status_filter,
+    )
+    return {"jobs": jobs, "count": len(jobs), "status": status_filter}
 
 
 @app.get("/jobs/{job_id}")

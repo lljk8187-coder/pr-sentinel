@@ -231,19 +231,41 @@ async def resolve_job(database_url: str, id_or_delivery: str) -> dict[str, Any] 
         await conn.close()
 
 
-async def list_jobs(database_url: str, *, limit: int = 50) -> list[dict[str, Any]]:
+async def list_jobs(
+    database_url: str,
+    *,
+    limit: int = 50,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    """List recent jobs; optional ``status`` filters ``WHERE status = $status``."""
     conn = await _connect(database_url)
     try:
-        rows = await conn.fetch(
-            """
-            SELECT id, delivery_id, owner, repo, pr, sha, status, error,
-                   arq_job_id, created_at
-            FROM jobs
-            ORDER BY created_at DESC
-            LIMIT $1
-            """,
-            max(0, limit),
-        )
+        lim = max(0, limit)
+        status_filter = status.strip() if isinstance(status, str) and status.strip() else None
+        if status_filter:
+            rows = await conn.fetch(
+                """
+                SELECT id, delivery_id, owner, repo, pr, sha, status, error,
+                       arq_job_id, created_at
+                FROM jobs
+                WHERE status = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                status_filter,
+                lim,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, delivery_id, owner, repo, pr, sha, status, error,
+                       arq_job_id, created_at
+                FROM jobs
+                ORDER BY created_at DESC
+                LIMIT $1
+                """,
+                lim,
+            )
         out: list[dict[str, Any]] = []
         for row in rows:
             out.append(_public_view(_row_to_record(row)))
