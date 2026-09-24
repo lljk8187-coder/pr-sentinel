@@ -84,3 +84,4 @@ curl -s -X POST -H "X-Admin-Token: $ADMIN_TOKEN" \
 | 重试 503 | 未设置 `ADMIN_TOKEN` |
 | 重试 403 | Token 错误；可用 `Authorization: Bearer` 或 `X-Admin-Token` |
 | 无 PR 评论 | Worker 日志、安装权限、`USE_FIXTURES`、installation_id |
+| Worker 启动报 Live mode / missing credentials | `USE_FIXTURES=false` 时必须配置 App 或 `GITHUB_TOKEN`（M18 不再静默 fixtures） |

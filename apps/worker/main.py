@@ -21,7 +21,12 @@ from common.job_store import update_job_status_by_payload  # noqa: E402
 from common import logutil  # noqa: E402
 from common import metrics as metrics_mod  # noqa: E402
 from common.queue import redis_settings_from_url  # noqa: E402
-from common.settings import Settings, get_settings  # noqa: E402
+from common.settings import (  # noqa: E402
+    Settings,
+    get_settings,
+    resolve_app_private_key,
+    validate_live_auth,
+)
 from pr_sentinel_github.analyzer import get_analyzer  # noqa: E402
 from pr_sentinel_github.client import GitHubClient  # noqa: E402
 from pr_sentinel_github.check_runs import (  # noqa: E402
@@ -77,21 +82,18 @@ def _findings_from_redacted_dicts(items: list[dict[str, Any]]) -> list[Finding]:
 
 
 def build_client(settings: Settings, installation_id: int | None = None) -> GitHubClient:
-    private_key = settings.github_app_private_key
-    if not private_key and settings.github_app_private_key_path:
-        private_key = Path(settings.github_app_private_key_path).read_text(encoding="utf-8")
+    """Build GitHubClient. Live mode (use_fixtures=false) fail-fasts without App/PAT."""
+    if not settings.use_fixtures:
+        validate_live_auth(settings)
 
-    use_fixtures = settings.use_fixtures
-    # If neither App nor PAT configured, force fixtures
-    if not settings.github_token and not (settings.github_app_id and private_key):
-        use_fixtures = True
+    private_key = resolve_app_private_key(settings)
 
     return GitHubClient(
         token=settings.github_token,
         app_id=settings.github_app_id,
         app_private_key=private_key,
         installation_id=installation_id,
-        use_fixtures=use_fixtures,
+        use_fixtures=settings.use_fixtures,
         fixtures_dir=settings.fixtures_path(),
         max_pages=settings.diff_max_pages,
         per_page=settings.diff_per_page,
@@ -355,8 +357,16 @@ async def process_pr(ctx: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]
 
 
 async def on_startup(ctx: dict[str, Any]) -> None:
-    ctx["settings"] = get_settings()
-    logger.info("arq worker startup redis=%s db=%s", ctx["settings"].redis_url, ctx["settings"].database_url)
+    settings = get_settings()
+    # M18: live mode must not silently fall back to fixtures
+    validate_live_auth(settings)
+    ctx["settings"] = settings
+    logger.info(
+        "arq worker startup redis=%s db=%s use_fixtures=%s",
+        settings.redis_url,
+        settings.database_url,
+        settings.use_fixtures,
+    )
 
 
 class WorkerSettings:

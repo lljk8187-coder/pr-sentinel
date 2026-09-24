@@ -47,12 +47,18 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PR_SENTINEL_OPENAI_API_KEY: ${PR_SENTINEL_OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       LOG_LEVEL: INFO
+    # Optional PEM bind for live App auth:
+    #   GITHUB_APP_PRIVATE_KEY_PATH=/secrets/github-app.pem
+    #   GITHUB_APP_PEM_HOST_PATH=./app.pem
+    # volumes:
+    #   - ${GITHUB_APP_PEM_HOST_PATH}:/secrets/github-app.pem:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -77,11 +83,15 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PR_SENTINEL_OPENAI_API_KEY: ${PR_SENTINEL_OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       LOG_LEVEL: INFO
+    # Optional PEM bind (uncomment for live App auth via file):
+    # volumes:
+    #   - ${GITHUB_APP_PEM_HOST_PATH}:/secrets/github-app.pem:ro
     depends_on:
       redis:
         condition: service_healthy

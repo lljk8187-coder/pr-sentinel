@@ -62,6 +62,64 @@ class Settings(BaseSettings):
         return Path(self.fixtures_dir)
 
 
+class LiveAuthError(RuntimeError):
+    """Raised when USE_FIXTURES=false but App/PAT credentials are missing."""
+
+
+def resolve_app_private_key(settings: "Settings") -> str:
+    """Return PEM text from GITHUB_APP_PRIVATE_KEY or *_PATH; empty if unset."""
+    inline = (settings.github_app_private_key or "").strip()
+    if inline:
+        return settings.github_app_private_key
+    path = (settings.github_app_private_key_path or "").strip()
+    if not path:
+        return ""
+    p = Path(path)
+    if not p.is_file():
+        return ""
+    return p.read_text(encoding="utf-8")
+
+
+def validate_live_auth(settings: "Settings") -> None:
+    """Fail-fast for live mode: require GitHub App or PAT; no silent fixtures.
+
+    No-op when ``settings.use_fixtures`` is True.
+    """
+    if settings.use_fixtures:
+        return
+
+    has_pat = bool((settings.github_token or "").strip())
+    has_app_id = bool((settings.github_app_id or "").strip())
+    key_path = (settings.github_app_private_key_path or "").strip()
+    inline_key = (settings.github_app_private_key or "").strip()
+    key_path_bad = bool(key_path) and not Path(key_path).is_file()
+    has_key = bool(inline_key) or (bool(key_path) and not key_path_bad)
+
+    if has_pat or (has_app_id and has_key):
+        return
+
+    missing: list[str] = []
+    if not has_pat:
+        missing.append("GITHUB_TOKEN")
+    if not has_app_id:
+        missing.append("GITHUB_APP_ID")
+    if not has_key:
+        if key_path_bad:
+            missing.append(
+                f"GITHUB_APP_PRIVATE_KEY_PATH={key_path!r} (not a readable file)"
+            )
+        else:
+            missing.append("GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_PATH")
+
+    raise LiveAuthError(
+        "Live mode (USE_FIXTURES=false) requires GitHub credentials; "
+        "silent fixtures fallback is disabled. Provide either:\n"
+        "  - GITHUB_APP_ID + (GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_PATH)\n"
+        "  - or GITHUB_TOKEN (PAT)\n"
+        f"Missing / invalid: {', '.join(missing)}"
+    )
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

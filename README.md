@@ -112,6 +112,7 @@ tests/
 | **生产** | GitHub App：`GITHUB_APP_ID` + private key + webhook `installation.id` → JWT → installation token |
 | **本地 / 兜底** | `GITHUB_TOKEN`（PAT / fine-grained） |
 | **无凭据演示** | `USE_FIXTURES=true` 读 `tests/fixtures/`，不打真网 |
+| **Live 无凭据** | `USE_FIXTURES=false` 且 App/PAT 皆空 → **启动 / build_client 立即失败**（不再静默回落 fixtures） |
 | **控制台 API** | `ADMIN_TOKEN` + Bearer / `X-Admin-Token` |
 
 ## 本地 Webhook：smee + HMAC

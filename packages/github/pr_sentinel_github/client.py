@@ -23,7 +23,10 @@ class GitHubClient:
     Auth priority:
       1. GitHub App ID + private key + installation_id → JWT → installation token
       2. GITHUB_TOKEN / PAT (local / fallback)
-      3. USE_FIXTURES=true → local JSON, no network
+      3. use_fixtures=True → local JSON, no network
+
+    Missing credentials no longer imply fixtures: live mode must fail-fast via
+    ``validate_live_auth`` / ``build_client`` when USE_FIXTURES=false.
     """
 
     def __init__(
@@ -81,11 +84,9 @@ class GitHubClient:
 
     @property
     def _should_use_fixtures(self) -> bool:
-        if self.use_fixtures:
-            return True
-        if not self.token and not self._has_app_creds:
-            return True
-        return False
+        # M18: never treat missing auth as fixtures — callers must set use_fixtures
+        # explicitly (or go through build_client / validate_live_auth in live mode).
+        return bool(self.use_fixtures)
 
     def _resolve_bearer(self) -> str | None:
         """Prefer explicit PAT; else exchange App installation token."""
