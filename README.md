@@ -120,6 +120,7 @@ tests/
 | **控制台 API** | `ADMIN_TOKEN` + Bearer / `X-Admin-Token` |
 
 真 App 步骤（**Checks: Read & write**、PEM 两路径、`installation_id`、HMAC/smee FAQ）：[docs/e2e-demo.md](./docs/e2e-demo.md#可选真-app)。
+无 Docker daemon 时用 **Host-mode live**（本机 Redis/Postgres + uvicorn/arq）：[docs/e2e-demo.md §4b](./docs/e2e-demo.md#4b-host-mode-live无-docker-daemon--对照-phase11)。
 开 PR 前可跑 live 预检：`python scripts/preflight_live.py`（exit 0=无 FAIL；详见 [docs/e2e-demo.md](./docs/e2e-demo.md#live-预检m35)）。
 联调证据模板（可选落盘）：[docs/records/](./docs/records/)。
 
@@ -196,6 +197,8 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" http://127.0.0.1:8000/jobs | jq
 说明：Redis 只做 delivery 去重 + arq；**jobs 只在 Postgres**。真 App + smee 仍见下文「本地 Webhook」与 [docs/e2e-demo.md](./docs/e2e-demo.md)（可选）。
 
 ### 本地分进程
+
+真 App live 且无 Docker daemon 时，把下方 `USE_FIXTURES=true` 换成 live 配置，完整步骤见 [Host-mode live](./docs/e2e-demo.md#4b-host-mode-live无-docker-daemon--对照-phase11)。
 
 ```bash
 # 终端 1 — Redis + Postgres（或只用 compose 起依赖）

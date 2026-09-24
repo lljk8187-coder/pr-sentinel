@@ -3,7 +3,7 @@
 两条路径：
 
 1. **默认验收（无真 App）**：`USE_FIXTURES=true` + 本地 HMAC webhook → `202` → `/console` 从 **Postgres** 看到 job（见 README「无真 App smoke」与 `scripts/smoke_fixtures_webhook.py`）。
-2. **可选真 App**：GitHub App → smee 转发 → 安装到测试仓 → 开 PR → 看控制台、Check Run、sticky / inline 评论（下文）。
+2. **可选真 App**：GitHub App → smee 转发 → 安装到测试仓 → 开 PR → 看控制台、Check Run、sticky / inline 评论（下文）。启动可用 **Compose**（§4）或 **Host-mode**（§4b；无 Docker daemon 时走此路径，与 Phase11 实况一致）。
 
 ## 前置
 
@@ -74,7 +74,7 @@ GITHUB_APP_PEM_HOST_PATH=./app.pem   # 仅给 compose 变量替换用
 
 并保证容器内 `GITHUB_APP_PRIVATE_KEY_PATH=/secrets/github-app.pem`。本机非 compose 时可直接 `GITHUB_APP_PRIVATE_KEY_PATH=/absolute/path/to/app.pem`。
 
-### 4. 启动 PR Sentinel
+### 4. 启动 PR Sentinel（Compose）
 
 ```bash
 cp .env.example .env
@@ -97,6 +97,53 @@ docker compose -f deploy/docker-compose.yml --env-file .env up --build
 - **控制台**：http://localhost:8000/console
 
 未设置 `ADMIN_TOKEN` 时，`GET /jobs` / `POST /jobs/{id}/retry` 返回 **503**。
+
+> PEM 文件挂载：compose 里 api/worker 的 volumes **默认保持注释**。仅当已设置 `GITHUB_APP_PEM_HOST_PATH` 指向真实文件时再取消注释；缺变量时勿打开，否则 compose 解析/挂载会失败。也可用路径 A（多行 `GITHUB_APP_PRIVATE_KEY`）而完全不碰 volumes。
+
+### 4b. Host-mode live（无 Docker daemon / 对照 Phase11）
+
+本机已有 **Redis + Postgres**，或不想用 compose 跑 api/worker 时，走这条路径（与 [Phase11 联调记录](./records/2026-09-24-phase11-live-e2e.md) 一致：host Redis/Postgres + uvicorn + arq）。**不要**为 Host-mode 去取消注释 compose PEM volumes。
+
+1. **依赖**：本机 Redis、Postgres 已监听；应用 `sql/001_jobs.sql`（compose 会靠 initdb 自动跑，Host-mode 需手动一次）：
+
+   ```bash
+   psql "$DATABASE_URL" -f sql/001_jobs.sql
+   # 例：postgresql://prsentinel:prsentinel@127.0.0.1:5432/prsentinel
+   ```
+
+2. **`.env` / 环境**（要点）：
+
+   ```bash
+   USE_FIXTURES=false
+   GITHUB_WEBHOOK_SECRET=<与 App Webhook Secret 相同>
+   WEBHOOK_SKIP_VERIFY=false
+   ADMIN_TOKEN=<长随机串>
+   GITHUB_APP_ID=<App ID>
+   # PEM：多行 GITHUB_APP_PRIVATE_KEY=...  或
+   GITHUB_APP_PRIVATE_KEY_PATH=/absolute/path/to/app.pem
+   DATABASE_URL=postgresql://prsentinel:prsentinel@127.0.0.1:5432/prsentinel
+   REDIS_URL=redis://127.0.0.1:6379/0
+   ```
+
+3. **起进程**（对照 README「本地分进程」，改为 live）：
+
+   ```bash
+   # 终端 A — API
+   export PYTHONPATH=.:packages:packages/github:apps/api
+   set -a && source .env && set +a
+   uvicorn main:app --app-dir apps/api --reload --port 8000
+
+   # 终端 B — Worker
+   export PYTHONPATH=.:packages:packages/github:apps/worker
+   set -a && source .env && set +a
+   python apps/worker/main.py
+   ```
+
+4. **smee** → `http://127.0.0.1:8000/webhooks/github`（同 §6）。
+
+5. **`python scripts/preflight_live.py`**（期望 exit 0）→ 再开测试 PR（§7）。
+
+完成后证据可选落盘见 [docs/records/](./records/README.md)。
 
 ### 5. `installation_id`（必须来自真实 App webhook）
 
@@ -178,7 +225,7 @@ python scripts/preflight_live.py
 - **exit 0**：无 FAIL（允许 WARN，例如 API 未启动时 `/health` 不通）
 - **exit 1**：配置未就绪（如仍 `USE_FIXTURES=true`、缺 App/PAT、PEM 路径不可读）
 
-通过后再按上文启动 compose / smee 并开 PR。
+通过后再按上文启动 **Compose（§4）或 Host-mode（§4b）**、接 smee 并开 PR。
 
 联调结束后可选用证据模板落盘（不强制）：[docs/records/TEMPLATE-live-e2e.md](./records/TEMPLATE-live-e2e.md)（说明见 [docs/records/README.md](./records/README.md)）。
 

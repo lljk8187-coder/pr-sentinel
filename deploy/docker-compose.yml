@@ -54,7 +54,10 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       LOG_LEVEL: INFO
-    # Optional PEM bind for live App auth:
+    # Optional PEM bind for live App auth (KEEP COMMENTED by default):
+    # Do not uncomment unless GITHUB_APP_PEM_HOST_PATH is set to a real file;
+    # otherwise compose variable substitution / bind mount will fail.
+    # Prefer Host-mode (docs/e2e-demo.md §4b) or multiline GITHUB_APP_PRIVATE_KEY.
     #   GITHUB_APP_PRIVATE_KEY_PATH=/secrets/github-app.pem
     #   GITHUB_APP_PEM_HOST_PATH=./app.pem
     # volumes:
@@ -89,7 +92,9 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       LOG_LEVEL: INFO
-    # Optional PEM bind for live App auth (same as api):
+    # Optional PEM bind for live App auth (same as api; KEEP COMMENTED by default):
+    # Do not uncomment unless GITHUB_APP_PEM_HOST_PATH is set to a real file;
+    # otherwise compose variable substitution / bind mount will fail.
     #   GITHUB_APP_PRIVATE_KEY_PATH=/secrets/github-app.pem
     #   GITHUB_APP_PEM_HOST_PATH=./app.pem
     # volumes:
