@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **Phase3 M13**（ops 收尾）：`check_run_url`（`/runs/{id}` UI 链接）、结构化日志字段、控制台按 status 计数与轻量 `GET /metrics`。M12：`validate_config` + 落库脱敏。M11：inline RIGHT + fingerprint。Phase2（M9）：findings 写回 Postgres。
+GitHub PR 质量闸门 — **0.10.0 / Phase4** 发布卫生：M14 出站脱敏（Check Run / sticky / inline）、M16 Worker 瞬态重试耗尽标 failed、M15 compose restart/health + `.env.example` 必填变量、M17 版本对齐与 CHANGELOG。Phase3（M13）：`check_run_url`、结构化日志、`GET /metrics`。Phase2（M9）：findings 写回 Postgres。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -262,6 +262,14 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **check_run_url**：由 `owner`/`repo`/`check_run_id` 计算为 `https://github.com/{owner}/{repo}/runs/{id}`（UI 路径，**不是** API 的 `/check-runs/`）；`GET /jobs/{id}` 与控制台详情共用 `job_to_detail_dict`，不落库 html_url。
 - **结构化日志**：webhook 入队/去重与 worker `process_pr` 状态转换日志带可检索字段 `delivery_id` / `job_id` / `sha`（短 12 位）。
 - **指标**：`/console` 按当前列表任务的 `status` 聚合计数；可选 `GET /metrics` 返回进程内计数（无 prometheus）。
+
+
+## Phase4（0.10.0）：发布卫生
+
+- **M14**：`privacy.redact_secrets` 时，出站前对 findings / report 脱敏，再发 Check Run / sticky / inline（与落库一致）。
+- **M16**：Worker 瞬态错误在最后一次 `job_try` 写入 `status=failed`（不再卡在 `running`）；中间尝试仍走 arq `Retry`。
+- **M15**：compose `api`/`worker` `restart: unless-stopped`；worker 进程级 healthcheck；`.env.example` 标注必填 Settings 变量。
+- **M17**：版本对齐 **0.10.0** + [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 测试
 
