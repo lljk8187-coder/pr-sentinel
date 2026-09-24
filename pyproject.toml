@@ -39,6 +39,11 @@ packages = ["packages/github/pr_sentinel_github"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = [".", "apps/api", "apps/worker", "packages/github", "packages"]
+# M22: silence Starlette TestClient deprecation noise (keep sync TestClient; no prod httpx2)
+filterwarnings = [
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+  "ignore:The anyio.abc.BlockingPortal alias is deprecated",
+]
 
 [tool.uv]
 dev-dependencies = [
