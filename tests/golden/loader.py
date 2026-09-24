@@ -48,7 +48,7 @@ def _normalize_expect(raw: Any, *, ctx: str) -> dict[str, list[dict[str, Any]]]:
         raise GoldenCaseError(f"{ctx}: expect.must_hit must be a list")
     if not isinstance(must_not, list):
         raise GoldenCaseError(f"{ctx}: expect.must_not must be a list")
-    return {
+    out: dict[str, Any] = {
         "must_hit": [
             _normalize_expect_item(x, ctx=f"{ctx}.must_hit[{i}]") for i, x in enumerate(must_hit)
         ],
@@ -56,6 +56,15 @@ def _normalize_expect(raw: Any, *, ctx: str) -> dict[str, list[dict[str, Any]]]:
             _normalize_expect_item(x, ctx=f"{ctx}.must_not[{i}]") for i, x in enumerate(must_not)
         ],
     }
+    if "soft" in raw:
+        if not isinstance(raw["soft"], bool):
+            raise GoldenCaseError(f"{ctx}: expect.soft must be a bool when present")
+        out["soft"] = raw["soft"]
+    if "findings_count" in raw:
+        if not isinstance(raw["findings_count"], int) or isinstance(raw["findings_count"], bool):
+            raise GoldenCaseError(f"{ctx}: expect.findings_count must be an int when present")
+        out["findings_count"] = raw["findings_count"]
+    return out
 
 
 def load_case(path: str | Path) -> dict[str, Any]:

@@ -1,0 +1,16 @@
+{
+  "id": "soft_bad_json",
+  "kind": "llm",
+  "response": "not json at all {{{",
+  "expect": {
+    "soft": true,
+    "findings_count": 0,
+    "must_hit": [],
+    "must_not": [
+      {
+        "rule_id": "llm",
+        "path": "src/app.py"
+      }
+    ]
+  }
+}

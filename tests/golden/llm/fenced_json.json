@@ -1,0 +1,17 @@
+{
+  "id": "fenced_json",
+  "kind": "llm",
+  "response": "```json\n{\n  \"findings\": [\n    {\n      \"severity\": \"error\",\n      \"title\": \"Hardcoded password\",\n      \"detail\": \"password assigned in source\",\n      \"path\": \"src/auth.py\",\n      \"line\": 42\n    }\n  ]\n}\n```",
+  "expect": {
+    "soft": false,
+    "findings_count": 1,
+    "must_hit": [
+      {
+        "rule_id": "llm",
+        "path": "src/auth.py",
+        "line": 42
+      }
+    ],
+    "must_not": []
+  }
+}

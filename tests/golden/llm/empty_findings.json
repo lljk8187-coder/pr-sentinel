@@ -1,0 +1,11 @@
+{
+  "id": "empty_findings",
+  "kind": "llm",
+  "response": "{\"findings\":[]}",
+  "expect": {
+    "soft": false,
+    "findings_count": 0,
+    "must_hit": [],
+    "must_not": []
+  }
+}
