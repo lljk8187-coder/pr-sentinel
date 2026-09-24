@@ -14,12 +14,12 @@ if str(_TESTS) not in sys.path:
 
 from golden.loader import GoldenCaseError, golden_root, load_case
 
-RULES_EXAMPLE = golden_root() / "rules" / "example_secrets_hit.json"
+RULES_EXAMPLE = golden_root() / "rules" / "secrets_hit_akia.json"
 
 
 def test_load_valid_rules_example():
     case = load_case(RULES_EXAMPLE)
-    assert case["id"] == "example-secrets-akia"
+    assert case["id"] == "secrets_hit_akia"
     assert case["kind"] == "rules"
     assert isinstance(case["files"], list) and len(case["files"]) == 1
     assert case["files"][0]["filename"] == "config.env"

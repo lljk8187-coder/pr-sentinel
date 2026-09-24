@@ -1,0 +1,20 @@
+{
+  "id": "skipped_tests_miss_normal_assert",
+  "kind": "rules",
+  "files": [
+    {
+      "filename": "tests/test_ok.py",
+      "status": "modified",
+      "patch": "@@ -10,0 +10,1 @@\n+    assert result == 1\n"
+    }
+  ],
+  "expect": {
+    "must_hit": [],
+    "must_not": [
+      {
+        "rule_id": "skipped_tests",
+        "path": "tests/test_ok.py"
+      }
+    ]
+  }
+}

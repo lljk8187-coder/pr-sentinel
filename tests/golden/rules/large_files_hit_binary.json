@@ -1,0 +1,23 @@
+{
+  "id": "large_files_hit_binary",
+  "kind": "rules",
+  "files": [
+    {
+      "filename": "assets/logo.png",
+      "status": "added",
+      "additions": 0,
+      "deletions": 0,
+      "changes": 0,
+      "patch": null
+    }
+  ],
+  "expect": {
+    "must_hit": [
+      {
+        "rule_id": "large_files",
+        "path": "assets/logo.png"
+      }
+    ],
+    "must_not": []
+  }
+}

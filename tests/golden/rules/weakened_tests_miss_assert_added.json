@@ -1,0 +1,22 @@
+{
+  "id": "weakened_tests_miss_assert_added",
+  "kind": "rules",
+  "files": [
+    {
+      "filename": "tests/test_bar.py",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -1,1 +1,2 @@\n     pass\n+    assert result == 1\n"
+    }
+  ],
+  "expect": {
+    "must_hit": [],
+    "must_not": [
+      {
+        "rule_id": "weakened_tests",
+        "path": "tests/test_bar.py"
+      }
+    ]
+  }
+}

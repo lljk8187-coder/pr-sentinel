@@ -1,0 +1,23 @@
+{
+  "id": "large_files_miss_small",
+  "kind": "rules",
+  "files": [
+    {
+      "filename": "src/tiny.txt",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "changes": 1,
+      "patch": "@@ -0,0 +1 @@\n+hello\n"
+    }
+  ],
+  "expect": {
+    "must_hit": [],
+    "must_not": [
+      {
+        "rule_id": "large_files",
+        "path": "src/tiny.txt"
+      }
+    ]
+  }
+}

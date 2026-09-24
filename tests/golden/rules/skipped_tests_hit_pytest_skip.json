@@ -1,0 +1,21 @@
+{
+  "id": "skipped_tests_hit_pytest_skip",
+  "kind": "rules",
+  "files": [
+    {
+      "filename": "tests/test_foo.py",
+      "status": "modified",
+      "patch": "@@ -10,0 +10,1 @@\n+    @pytest.mark.skip(reason='flaky')\n"
+    }
+  ],
+  "expect": {
+    "must_hit": [
+      {
+        "rule_id": "skipped_tests",
+        "path": "tests/test_foo.py",
+        "line": 10
+      }
+    ],
+    "must_not": []
+  }
+}
