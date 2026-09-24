@@ -5,6 +5,10 @@ summary_comment: true
 check_run: true
 inline_comments: true
 update_strategy: update   # update | recreate | skip_if_exists
+# ignore_paths: pathspec GitIgnoreSpec (gitwildmatch). Defaults = docs/** + **/*.md.
+# Rules + LLM share the same filter (filter_ignored → then analyze). Does NOT read repo .gitignore.
+# deep_merge replaces lists wholesale (not append): write the full list if you want fewer ignores;
+# ignore_paths: [] means no filtering. With defaults, secrets inside *.md are NOT scanned.
 ignore_paths:
   - "docs/**"
   - "**/*.md"

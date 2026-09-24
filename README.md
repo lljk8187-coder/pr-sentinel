@@ -62,6 +62,7 @@ tests/
 
 - Worker **只读 default branch** 上的 `.pr-sentinel.yml`（PR 分支上的配置忽略）。
 - 合并策略：`deep_merge(DEFAULT_CONFIG, repo_yml)`；加载后手写 `validate_config` 校验未知键 / 类型 / 枚举，坏字段回退默认值并追加中文 notes（**不**因非法值失败整 job；解析失败仍仅用 DEFAULT）。
+- **list 为整表替换**：`deep_merge` 对 list / 标量是 overlay **整段替换**（不是追加）。因此若只想少忽略几条路径，须在配置里写出**完整** `ignore_paths` 列表；`ignore_paths: []` 表示不过滤（空表替换默认，不会保留默认的 `docs/**` / `**/*.md`）。
 - 文件不存在 / 解析失败 → 仅用 `DEFAULT_CONFIG`，并在报告中注明。
 - Fixture 模式：读 `tests/fixtures/pr-sentinel.yml`。
 - **落库脱敏**：`privacy.redact_secrets`（默认 true）时，Worker 在写入 Postgres 的 findings（含 `meta.match`）与 `report_md` 前做 `***REDACTED***` 替换。
@@ -75,7 +76,7 @@ tests/
 | `check_run` | 是否创建 GitHub Check Run `pr-sentinel`（默认 `true`）；无 error/high/critical → success，否则 failure |
 | `inline_comments` | 高危（error/high/critical）且有 path+line 时发 inline review comment（默认 `true`） |
 | `update_strategy` | `update`（默认 PATCH）/ `recreate`（删旧再 POST）/ `skip_if_exists` |
-| `ignore_paths` | gitignore 风格（**pathspec.GitIgnoreSpec**）：`**`、目录前缀、取反 `!`；匹配文件不进入规则扫描 |
+| `ignore_paths` | gitignore 风格（**pathspec** `GitIgnoreSpec` / gitwildmatch）：`**`、目录前缀、取反 `!`。默认 `docs/**` 与 `**/*.md`。规则引擎与 LLM **共用**同一套过滤（`filter_ignored` 后再分析）。**不读** 仓库 `.gitignore`。配置 list 为整表替换；`[]` = 不过滤。因此默认情况下 **md 内密钥扫不到**（被 `**/*.md` 忽略）。 |
 | `rules.secrets` | patch/文件名正则 |
 | `rules.large_files` | `max_bytes`（patch 字节）、`max_additions`、`binary_extensions`；无 patch 且高 changes/二进制扩展 → `binary_or_truncated`（不臆造真实 size） |
 | `rules.weakened_tests` | 删除测试文件或 assert 净减少 |
@@ -248,11 +249,16 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - Redis **仅**保留 delivery 去重 + arq；**禁止**再写 `pr-sentinel:job:*`。
 - 不做多租户 / Alembic / ORM；不用 PG 替 arq。
 
-## Phase2 M6：gitignore ignore_paths + large_files
+## Phase2 M6：ignore_paths + large_files（语义见 Phase7 M28）
 
-- `ignore_paths`：`pathspec.GitIgnoreSpec`（或等价 `PathSpec.from_lines('gitwildmatch', …)`），覆盖目录前缀、`**`、取反 `!`。
+- `ignore_paths`：使用 **pathspec** 的 `GitIgnoreSpec`（gitwildmatch），覆盖目录前缀、`**`、取反 `!`。
+- **默认**：`docs/**` 与 `**/*.md`（见 `DEFAULT_CONFIG`）。
+- **共用过滤**：规则引擎与 LLM 都先 `filter_ignored`，只对 kept 文件分析（LLM 收到的也是 kept）。
+- **不读** 仓库 `.gitignore`（仅认配置 / 默认里的 `ignore_paths`）。
+- **list 整表替换**：`deep_merge` 对 list 是 overlay 替换不是追加；只想少忽略时须显式写完整列表；`ignore_paths: []` = 不过滤。
+- **默认后果**：`README.md` / 任意 `*.md` 内的密钥等默认**扫不到**（被 `**/*.md` 忽略）；若要扫 md，设完整列表或 `ignore_paths: []`。
 - `large_files`：patch 字节 ≥ `max_bytes`、additions ≥ `max_additions`、或无 patch 且（高 changes / 命中 `binary_extensions`）→ finding；meta 含 `reason` / `approx_patch_bytes` / `additions` / `binary_or_truncated`。
-- **不做** Contents API 拉文件、不臆造真实文件 size；小文本不误报。
+- **不做** Contents API 拉文件、不臆造真实文件 size；小文本不误报；**不做** 自动合并仓库 `.gitignore`。
 - 依赖：`pathspec`（见 `requirements.txt` / `pyproject.toml`）。
 
 ## Phase2 M7：GitHub Actions CI
@@ -299,6 +305,12 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **M24**：webhook Content-Length/body 超限 → 413（默认 1MiB）；Redis INCR+EXPIRE 限流 → 429（默认 120/60s）；顺序限流→体长→HMAC；无 slowapi。
 - **M25**：版本对齐 **1.1.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.1`。
 - **Notes**：真 GitHub App / live E2E **可选**，不是 1.1.0 硬门禁。
+
+## Phase7 M28：ignore_paths 体验澄清（文档 / 契约）
+
+- 文档写清：`pathspec` GitIgnoreSpec、默认 `docs/**` + `**/*.md`、规则+LLM 共用 `filter_ignored`、**不读** `.gitignore`、list 整表替换与 `[]` 不过滤、默认 md 密钥扫不到。
+- **不做**：自动合并 `.gitignore`、换 path 库、升 1.2、改规则/LLM 过滤逻辑（默认行为不变）。
+- 契约测：`ignore_paths: []` 时 `README.md` / `notes.md` 进 kept，可被 secrets 等规则扫到。
 
 ## Phase5（1.0.0）：就绪发布
 
