@@ -126,12 +126,27 @@ def _make_api_client(monkeypatch, webhook_secret: str, admin: str, database_url:
         ok = await fake.set(key, "1", nx=True, ex=ttl)
         return bool(ok)
 
+    async def fake_rate_limit(
+        redis_url,
+        client_key,
+        *,
+        limit=120,
+        window_seconds=60,
+        prefix="pr-sentinel:webhook:rl:",
+    ):
+        key = f"{prefix}{client_key}"
+        n = await fake.incr(key)
+        if n == 1:
+            await fake.expire(key, window_seconds)
+        return n <= limit
+
     async def fake_create_pool(_url):
         return fake_pool
 
     import main as api_main
 
     monkeypatch.setattr(api_main, "claim_delivery", fake_claim)
+    monkeypatch.setattr(api_main, "check_webhook_rate_limit", fake_rate_limit)
     monkeypatch.setattr(api_main, "create_arq_pool", fake_create_pool)
 
     def _settings(**overrides):
@@ -143,6 +158,10 @@ def _make_api_client(monkeypatch, webhook_secret: str, admin: str, database_url:
             database_url=database_url,
             use_fixtures=True,
             admin_token=admin,
+            webhook_max_body_bytes=1_048_576,
+            webhook_rate_limit=120,
+            webhook_rate_window_seconds=60,
+            webhook_rate_limit_prefix="pr-sentinel:webhook:rl:",
         )
         base.update(overrides)
         return Settings(**base)

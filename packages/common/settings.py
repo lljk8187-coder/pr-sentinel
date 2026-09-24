@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     delivery_dedup_prefix: str = "pr-sentinel:delivery:"
     delivery_dedup_ttl: int = 86400 * 7  # 7 days
 
+    # Phase6 M24: webhook body size + Redis rate limit (no slowapi)
+    webhook_max_body_bytes: int = 1_048_576  # 1 MiB
+    webhook_rate_limit: int = 120
+    webhook_rate_window_seconds: int = 60
+    webhook_rate_limit_prefix: str = "pr-sentinel:webhook:rl:"
+
     # Auth: production prefers GitHub App; local/PAT is fallback
     github_token: str = ""
     github_app_id: str = ""

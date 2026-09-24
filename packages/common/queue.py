@@ -60,6 +60,42 @@ async def claim_delivery(
         await client.aclose()
 
 
+async def check_webhook_rate_limit(
+    redis_url: str,
+    client_key: str,
+    *,
+    limit: int = 120,
+    window_seconds: int = 60,
+    prefix: str = "pr-sentinel:webhook:rl:",
+) -> bool:
+    """INCR+EXPIRE fixed-window rate limit. Return True if allowed; False if over limit.
+
+    Fail-open on Redis errors: log a warning and allow the request through so a
+    Redis blip cannot take down GitHub webhook delivery (availability over
+    strict enforcement when the limiter itself is unavailable).
+    """
+    client = None
+    try:
+        client = redis_async.from_url(redis_url, decode_responses=True)
+        key = f"{prefix}{client_key}"
+        n = await client.incr(key)
+        if n == 1:
+            await client.expire(key, window_seconds)
+        return n <= limit
+    except Exception:
+        logger.warning(
+            "webhook rate limit check failed (fail-open); allowing request",
+            exc_info=True,
+        )
+        return True
+    finally:
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+
+
 async def enqueue_process_pr(pool: ArqRedis, job: dict[str, Any]) -> str | None:
     """Enqueue the arq function ``process_pr``. Returns arq job id."""
     job_result = await pool.enqueue_job("process_pr", job)

@@ -31,7 +31,12 @@ from common.job_store import (  # noqa: E402
 )
 from common import logutil  # noqa: E402
 from common import metrics as metrics_mod  # noqa: E402
-from common.queue import claim_delivery, create_arq_pool, enqueue_process_pr  # noqa: E402
+from common.queue import (  # noqa: E402
+    check_webhook_rate_limit,
+    claim_delivery,
+    create_arq_pool,
+    enqueue_process_pr,
+)
 from common.settings import Settings, get_settings  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -359,9 +364,33 @@ async def github_webhook(
     x_github_delivery: str | None = Header(default=None, alias="X-GitHub-Delivery"),
 ) -> Response:
     settings = get_settings()
-    body = await request.body()
 
-    # HMAC still required when using smee locally unless explicit skip switch
+    # 1) Rate limit (before reading body) — Redis INCR+EXPIRE; fail-open on Redis errors
+    client_host = (request.client.host if request.client else None) or "unknown"
+    allowed = await check_webhook_rate_limit(
+        settings.redis_url,
+        client_host,
+        limit=settings.webhook_rate_limit,
+        window_seconds=settings.webhook_rate_window_seconds,
+        prefix=settings.webhook_rate_limit_prefix,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="rate limit exceeded")
+
+    # 2) Body size — Content-Length first (avoid reading oversized body), then actual len
+    max_bytes = settings.webhook_max_body_bytes
+    cl_raw = request.headers.get("content-length")
+    if cl_raw is not None:
+        try:
+            if int(cl_raw) > max_bytes:
+                raise HTTPException(status_code=413, detail="payload too large")
+        except ValueError:
+            pass  # non-numeric Content-Length → fall through to body check
+    body = await request.body()
+    if len(body) > max_bytes:
+        raise HTTPException(status_code=413, detail="payload too large")
+
+    # 3) HMAC still required when using smee locally unless explicit skip switch
     if not settings.skip_webhook_verify:
         if not verify_signature(settings.github_webhook_secret, body, x_hub_signature_256):
             logger.warning("webhook signature verification failed delivery=%s", x_github_delivery)
