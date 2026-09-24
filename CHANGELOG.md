@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **M19**: Docs + env/compose scaffolding for **无真 App smoke** (fixtures + HMAC webhook → 202 → `/console` from Postgres); optional `scripts/smoke_fixtures_webhook.py` (stdlib).
+
+### Changed
+- **M19**: `docs/e2e-demo.md` — jobs archive is Postgres (removed outdated Redis `pr-sentinel:jobs` LIST wording); real App / smee kept optional.
+
 ## [0.10.0] — 2026-09-24
 
 Phase4 release hygiene (no new product surface; no real GitHub App / fixtures=false claims).

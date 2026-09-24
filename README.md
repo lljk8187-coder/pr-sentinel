@@ -34,7 +34,8 @@ apps/worker/              arq WorkerSettings + process_pr
 packages/common/          settings / queue / job_store(asyncpg) / DEFAULT_CONFIG
 packages/github/          GitHub 客户端 + 规则 + llm + sticky
 sql/001_jobs.sql          Postgres jobs 表（compose initdb）
-docs/e2e-demo.md          端到端演示
+docs/e2e-demo.md          端到端演示（含可选真 App；默认无真 App）
+scripts/smoke_fixtures_webhook.py  无真 App HMAC webhook smoke（stdlib）
 deploy/docker-compose.yml
 tests/
 ```
@@ -161,6 +162,32 @@ open http://localhost:8000/console
 
 端到端演示：[docs/e2e-demo.md](./docs/e2e-demo.md)。
 
+### 无真 App smoke（默认验收 · M19）
+
+不创建 GitHub App、不用 smee。目标：HMAC 验签通过 → API **202** → **Postgres** `jobs` 落库 → `/console` 可见。
+
+```bash
+# 1) .env（或 compose 默认）
+#   USE_FIXTURES=true
+#   GITHUB_WEBHOOK_SECRET=dev-secret   # 与下方一致
+#   ADMIN_TOKEN=dev-admin              # 控制台 /jobs 鉴权
+#   WEBHOOK_SKIP_VERIFY=false
+
+docker compose -f deploy/docker-compose.yml --env-file .env up --build -d
+curl -sf http://127.0.0.1:8000/health
+
+# 2) 发一条签名 webhook（stdlib，零新依赖）
+export GITHUB_WEBHOOK_SECRET=dev-secret
+python scripts/smoke_fixtures_webhook.py
+# 期望打印 HTTP 202
+
+# 3) 控制台 / API 应能看到 PG 任务
+open http://127.0.0.1:8000/console
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" http://127.0.0.1:8000/jobs | jq
+```
+
+说明：Redis 只做 delivery 去重 + arq；**jobs 只在 Postgres**。真 App + smee 仍见下文「本地 Webhook」与 [docs/e2e-demo.md](./docs/e2e-demo.md)（可选）。
+
 ### 本地分进程
 
 ```bash
@@ -264,6 +291,13 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **结构化日志**：webhook 入队/去重与 worker `process_pr` 状态转换日志带可检索字段 `delivery_id` / `job_id` / `sha`（短 12 位）。
 - **指标**：`/console` 按当前列表任务的 `status` 聚合计数；可选 `GET /metrics` 返回进程内计数（无 prometheus）。
 
+
+## Phase5 M19：无真 App 文档 / smoke 脚手架
+
+- 修正 e2e 文档中过时的 Redis jobs LIST 表述（jobs → **Postgres**）。
+- README 明确 **无真 App smoke** 步骤；可选 `scripts/smoke_fixtures_webhook.py`。
+- Compose `GITHUB_APP_PRIVATE_KEY_PATH` + 注释 PEM volume（M18 已就绪，本里程碑仅核对）。
+- **不做** M20/M21、不强制真 App E2E。
 
 ## Phase4（0.10.0）：发布卫生
 

@@ -89,7 +89,9 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       LOG_LEVEL: INFO
-    # Optional PEM bind (uncomment for live App auth via file):
+    # Optional PEM bind for live App auth (same as api):
+    #   GITHUB_APP_PRIVATE_KEY_PATH=/secrets/github-app.pem
+    #   GITHUB_APP_PEM_HOST_PATH=./app.pem
     # volumes:
     #   - ${GITHUB_APP_PEM_HOST_PATH}:/secrets/github-app.pem:ro
     depends_on:
