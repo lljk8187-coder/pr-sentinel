@@ -1,7 +1,7 @@
 [project]
 name = "pr-sentinel"
-version = "1.6.0"
-description = "PR quality gate — Phase11/1.6.0 first real App live e2e proven (optional for others; Phase10 golden sampling retained)"
+version = "1.7.0"
+description = "PR quality gate — Phase12/1.7.0 wrap-up (Host-mode docs, golden_score --help + CI informational; live e2e still optional)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-09-24
+
+Phase12 wrap-up release (**1.6.0 → 1.7.0**). **Notes:** real GitHub App / live E2E remains **optional**; golden score stays informational (not a hard gate); no App uninstall via API.
+
+### Added
+- **M42**: Live-e2e wrap-up docs — reproduce notes in `docs/records/`; Phase11 record notes PR#1 CLOSED (unmerged); local trigger branch cleanup guidance; App keep-or-manual-uninstall.
+- **M43**: Dual-path live docs — **Host-mode live** beside Compose in `docs/e2e-demo.md` (§4b); compose PEM volumes stay **commented** optional; README short links.
+- **M44**: `scripts/golden_score.py` argparse / `--help` (parse before heavy imports, exit 0); CI step after pytest with `continue-on-error: true` (informational).
+- Version alignment to **1.7.0** (`pyproject.toml`, FastAPI `version`, User-Agent `pr-sentinel/1.7`, README, this changelog). Subpackage `pr-sentinel-github` stays **0.2.0**; smoke UA `pr-sentinel-smoke/0.1` unchanged.
+
 ## [1.6.0] — 2026-09-24
 
 Phase11 live-proof release: first sanitized real GitHub App end-to-end success on record. **Notes:** live E2E remains **optional** for others (fixtures smoke is still the default path); not a hard gate to develop or CI.
