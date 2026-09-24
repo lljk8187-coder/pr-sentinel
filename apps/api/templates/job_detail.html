@@ -114,6 +114,8 @@
       <thead>
         <tr>
           <th>严重度</th>
+          <th>来源</th>
+          <th>规则</th>
           <th>标题 / 消息</th>
           <th>路径</th>
           <th>行</th>
@@ -124,6 +126,8 @@
         {% for f in job.findings %}
         <tr>
           <td class="sev-{{ f.severity or '' }}">{{ f.severity or '—' }}</td>
+          <td>{{ f.source or (f.meta.source if f.meta else none) or '—' }}</td>
+          <td><code>{{ f.rule_id or (f.meta.rule_id if f.meta else none) or '—' }}</code></td>
           <td>{{ f.title or f.message or '—' }}</td>
           <td><code>{{ f.path or f.filename or '—' }}</code></td>
           <td>{{ f.line if f.line is not none else '—' }}</td>

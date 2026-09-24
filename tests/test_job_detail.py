@@ -176,7 +176,16 @@ def test_console_job_detail_page(api_client_admin, admin_token, database_url):
             database_url,
             rec["id"],
             status="success",
-            findings=[{"severity": "warning", "title": "large", "message": "large", "path": "bin.dat"}],
+            findings=[
+                {
+                    "severity": "warning",
+                    "title": "large",
+                    "message": "large",
+                    "path": "bin.dat",
+                    "source": "rules",
+                    "rule_id": "large_files",
+                }
+            ],
             report_md="# Hello M9\n",
         )
         return rec["id"]
@@ -187,6 +196,10 @@ def test_console_job_detail_page(api_client_admin, admin_token, database_url):
     assert "任务详情" in resp.text
     assert "Hello M9" in resp.text
     assert "bin.dat" in resp.text
+    assert "来源" in resp.text
+    assert "规则" in resp.text
+    assert "rules" in resp.text
+    assert "large_files" in resp.text
     assert "Postgres" in resp.text or "findings" in resp.text.lower()
 
     list_resp = client.get("/console")
