@@ -6,7 +6,17 @@
 
 | 记录 | 说明 |
 | --- | --- |
-| [2026-09-24-phase11-live-e2e.md](./2026-09-24-phase11-live-e2e.md) | **首份填好的真 App live 证明**（Phase11 / 1.6.0）：App `pr-sentinel-live-e2e` → smee → HMAC → Check Run + sticky + inline（rules secrets）；触发 PR 未合入 main |
+| [2026-09-24-phase11-live-e2e.md](./2026-09-24-phase11-live-e2e.md) | **首份填好的真 App live 证明**（Phase11 / 1.6.0）：App `pr-sentinel-live-e2e` → smee → HMAC → Check Run + sticky + inline（rules secrets）；触发 **PR#1 已关闭、未合入 main**；远程 live-e2e 分支已删 |
+
+
+## 如何复现（可选）
+
+真 App live 联调**不强制**；需要再走一遍时：
+
+1. 步骤与 FAQ：[docs/e2e-demo.md](../e2e-demo.md)（权限 / PEM / installation_id / HMAC / smee）。
+2. 开 PR 前静态预检：`python scripts/preflight_live.py`（期望 exit 0）。
+3. 对照已有证据：[2026-09-24-phase11-live-e2e.md](./2026-09-24-phase11-live-e2e.md)（Phase11）；新跑完可再填一份 TEMPLATE。
+4. 收尾：触发用的测试 **PR 可以关闭**（不必合入 main）；远程临时分支可删。测试用 GitHub App **可保留**，也可在 GitHub 设置里**手动卸装**——**不要**用 API 自动卸 App。
 
 ## 何时填
 
