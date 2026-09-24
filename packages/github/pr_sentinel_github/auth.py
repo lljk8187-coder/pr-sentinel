@@ -40,7 +40,7 @@ def exchange_installation_token(
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token_jwt}",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "pr-sentinel/1.3",
+        "User-Agent": "pr-sentinel/1.4",
     }
     url = f"{GITHUB_API}/app/installations/{installation_id}/access_tokens"
     owns = http_client is None

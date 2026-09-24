@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **1.3.0 / Phase8**：输出与控制台收口（M30 `merge_findings` 跨源去重；M31 sticky ~60k 截断 + severity 排序 + inline detail ~2k；M32 控制台详情 findings 展示 source/rule_id；M33 版本对齐）。真 App E2E **可选**（非硬门禁）。Phase7（1.2.0）：分析质量。Phase6（1.1.0）：webhook 限流/体长 / 嵌套配置 / TestClient 消噪。Phase5（1.0.0）：live fail-fast / smoke 脚手架 / console ops。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。
+GitHub PR 质量闸门 — **1.4.0 / Phase9**：真 App 就绪文档收口（M34 权限/PEM/installation_id/HMAC FAQ；M35 `preflight_live.py`；M36 `docs/records` 证据模板；M37 版本对齐）。真 App E2E **可选**（非硬门禁）。Phase8（1.3.0）：输出与控制台。Phase7（1.2.0）：分析质量。Phase6（1.1.0）：webhook 限流/体长 / 嵌套配置 / TestClient 消噪。Phase5（1.0.0）：live fail-fast / smoke 脚手架 / console ops。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -311,6 +311,14 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **M24**：webhook Content-Length/body 超限 → 413（默认 1MiB）；Redis INCR+EXPIRE 限流 → 429（默认 120/60s）；顺序限流→体长→HMAC；无 slowapi。
 - **M25**：版本对齐 **1.1.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.1`。
 - **Notes**：真 GitHub App / live E2E **可选**，不是 1.1.0 硬门禁。
+
+## Phase9（1.4.0）：真 App 就绪文档
+
+- **M34**：真 App 文档补全 — **Checks: Read & write**、Contents/PR/Issues、PEM 两路径、真实 `installation_id`、HMAC/smee FAQ；`install.html` + README 短链。
+- **M35**：`scripts/preflight_live.py` — live 静态预检（stdlib；不调 GitHub API / 不签发 JWT）。
+- **M36**：`docs/records/` — 联调证据 TEMPLATE + 脱敏与 gitignore 约定。
+- **M37**：版本对齐 **1.4.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.4`（子包 `pr-sentinel-github` 仍 0.2.0；smoke UA `pr-sentinel-smoke/0.1` 未动）。
+- **Notes**：真 GitHub App / live E2E **可选**，不是 1.4.0 硬门禁。
 
 ## Phase8（1.3.0）：输出与控制台
 

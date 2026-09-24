@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-24
+
+Phase9 live-readiness release (docs / preflight / evidence templates). **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
+
+### Added
+- **M34**: Real GitHub App setup docs — Checks R/W permissions, PEM env vs PATH+compose mount, real `installation_id`, HMAC/smee order & FAQ; install page + README short link.
+- **M35**: `scripts/preflight_live.py` — stdlib live static preflight (USE_FIXTURES / App|PAT / PEM path / optional `/health`); no GitHub API or JWT.
+- **M36**: `docs/records/` — live E2E evidence TEMPLATE + redaction rules; gitignore keeps templates, ignores secrets/local filled copies.
+- **M37**: Version alignment to **1.4.0** across `pyproject.toml`, FastAPI `version`, GitHub `User-Agent` (`pr-sentinel/1.4`), README, and this changelog.
+
 ## [1.3.0] — 2026-09-24
 
 Phase8 output & console release. **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
