@@ -198,8 +198,12 @@ def max_severity(findings: list[Finding], default: str = "info") -> str:
     return best.severity
 
 
-def _parse_llm_findings(content: str) -> list[Finding]:
-    """Parse model JSON (or fenced JSON) into Finding list."""
+def _parse_llm_findings(content: str) -> tuple[list[Finding], bool]:
+    """Parse model JSON (or fenced JSON) into Finding list.
+
+    Returns ``(findings, soft)`` where *soft* is True when the content could not
+    be parsed as JSON (caller should soft-skip without synthesizing a Finding).
+    """
     text = content.strip()
     if text.startswith("```"):
         # strip markdown fence
@@ -217,27 +221,11 @@ def _parse_llm_findings(content: str) -> list[Finding]:
         # Try to find a JSON object/array in the text
         m = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
         if not m:
-            return [
-                Finding(
-                    rule_id="llm",
-                    severity="info",
-                    message="LLM 返回非 JSON，已作为摘要保留",
-                    source="llm",
-                    detail=text[:2000],
-                )
-            ]
+            return [], True
         try:
             data = json.loads(m.group(1))
         except json.JSONDecodeError:
-            return [
-                Finding(
-                    rule_id="llm",
-                    severity="info",
-                    message="LLM 返回无法解析的内容",
-                    source="llm",
-                    detail=text[:2000],
-                )
-            ]
+            return [], True
 
     items: list[Any]
     if isinstance(data, dict):
@@ -283,7 +271,7 @@ def _parse_llm_findings(content: str) -> list[Finding]:
                 }},
             )
         )
-    return findings
+    return findings, False
 
 
 def build_llm_prompt(
@@ -454,5 +442,16 @@ def review_with_llm(
     # LLMTransientError intentionally propagates for arq retry
 
     result.raw_content = content
-    result.findings = _parse_llm_findings(content)
+    findings, parse_soft = _parse_llm_findings(content)
+    if parse_soft:
+        logger.warning(
+            "LLM parse soft-skip (non-JSON or unparseable content): %s",
+            (content or "")[:300],
+        )
+        result.findings = []
+        result.assumptions.append(
+            "llm_parse_soft: true — LLM 返回无法解析为结构化 findings 的内容，已降级忽略本次 LLM 结果。"
+        )
+        return result
+    result.findings = findings
     return result

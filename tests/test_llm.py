@@ -12,6 +12,7 @@ from common.defaults import get_default_config
 from pr_sentinel_github.analyzer import RulesLLMAnalyzer, get_analyzer
 from pr_sentinel_github.llm import (
     REDACT_PLACEHOLDER,
+    _parse_llm_findings,
     call_chat_completions,
     redact_secrets,
     review_with_llm,
@@ -195,3 +196,88 @@ def test_worker_settings_retries():
     assert mod.WorkerSettings.max_tries == 3
     assert mod.WorkerSettings.job_timeout == 300
     assert mod.WorkerSettings.retry_jobs is True
+
+
+def test_parse_llm_findings_bad_json_is_soft():
+    findings, soft = _parse_llm_findings("not json at all {{{")
+    assert findings == []
+    assert soft is True
+
+
+def test_parse_llm_findings_empty_array_not_soft():
+    findings, soft = _parse_llm_findings('{"findings":[]}')
+    assert findings == []
+    assert soft is False
+
+
+def test_parse_llm_findings_valid_findings():
+    payload = {
+        "findings": [
+            {
+                "severity": "warning",
+                "title": "Missing error handling",
+                "detail": "hello() has no try/except",
+                "path": "src/app.py",
+            }
+        ]
+    }
+    findings, soft = _parse_llm_findings(json.dumps(payload))
+    assert soft is False
+    assert len(findings) == 1
+    assert findings[0].message == "Missing error handling"
+    assert findings[0].severity == "warning"
+    assert findings[0].filename == "src/app.py"
+
+
+def test_review_with_llm_parse_soft_no_synthetic_finding(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Totally not JSON <<>>"}}]},
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = review_with_llm(
+        SAMPLE_FILES,
+        rule_findings=[],
+        config=get_default_config(),
+        pr_number=1,
+        head_sha="abc",
+        http_client=client,
+    )
+    assert result.skipped is False
+    assert result.findings == []
+    assert any("llm_parse_soft" in a for a in result.assumptions)
+    assert not any(
+        getattr(f, "message", "").startswith("LLM 返回") for f in result.findings
+    )
+
+
+def test_review_with_llm_empty_findings_json_not_soft(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps({"findings": []})}}
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = review_with_llm(
+        SAMPLE_FILES,
+        rule_findings=[],
+        config=get_default_config(),
+        pr_number=1,
+        head_sha="abc",
+        http_client=client,
+    )
+    assert result.findings == []
+    assert not any("llm_parse_soft" in a for a in result.assumptions)
+    assert result.skipped is False
+
