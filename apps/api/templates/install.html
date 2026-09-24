@@ -30,9 +30,15 @@
       <li>GitHub → Settings → Developer settings → <strong>GitHub Apps</strong> → New。</li>
       <li>Webhook URL：填 <a href="https://smee.io" target="_blank" rel="noopener">smee.io</a> channel，或公网 API <code>/webhooks/github</code>。</li>
       <li>Webhook Secret：与环境变量 <code>GITHUB_WEBHOOK_SECRET</code> <strong>完全一致</strong>（即使用 smee 也建议验签）。</li>
-      <li>权限：Contents Read、Pull requests Read &amp; Write、Issues Read &amp; Write（sticky comment）。</li>
+      <li>Repository permissions：
+        <strong>Checks Read &amp; Write</strong>（Check Run，缺则 403）、
+        Contents Read、
+        Pull requests Read &amp; Write、
+        Issues Read &amp; Write（sticky）。
+      </li>
       <li>事件：至少勾选 <code>Pull request</code>。</li>
-      <li>记下 <code>App ID</code>，下载 Private Key（PEM）。</li>
+      <li>记下 <code>App ID</code>，下载 Private Key（PEM）。PEM 可用 <code>GITHUB_APP_PRIVATE_KEY</code> 多行，或 <code>GITHUB_APP_PRIVATE_KEY_PATH</code> + compose 挂载（见 <code>deploy/docker-compose.yml</code> 注释）。</li>
+      <li><code>installation_id</code> 必须来自真实 App webhook 的 <code>installation.id</code>；smoke 假 ID 不可用于 live。</li>
     </ol>
   </div>
 
@@ -51,9 +57,9 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
 REDIS_URL=redis://localhost:6379/0
 ADMIN_TOKEN=请换成足够长的随机串   # 控制台 /jobs /retry 鉴权
 OPENAI_API_KEY=                    # 可选；无则 rules-only
-WEBHOOK_SKIP_VERIFY=false
-USE_FIXTURES=false                 # 真机联调关 fixture</pre>
-    <p>未设置 <code>ADMIN_TOKEN</code> 时，<code>GET /jobs</code> 与 <code>POST /jobs/{id}/retry</code> 返回 <strong>503</strong>。</p>
+WEBHOOK_SKIP_VERIFY=false          # 保持验签；true 仅限本机假 body 调试
+USE_FIXTURES=false                 # live：缺 App/PAT 会 fail-fast</pre>
+    <p>未设置 <code>ADMIN_TOKEN</code> 时，<code>GET /jobs</code> 与 <code>POST /jobs/{id}/retry</code> 返回 <strong>503</strong>。完整真 App 步骤见仓库 <code>docs/e2e-demo.md</code>。</p>
   </div>
 
   <div class="card">

@@ -117,6 +117,8 @@ tests/
 | **Live 无凭据** | `USE_FIXTURES=false` 且 App/PAT 皆空 → **启动 / build_client 立即失败**（不再静默回落 fixtures） |
 | **控制台 API** | `ADMIN_TOKEN` + Bearer / `X-Admin-Token` |
 
+真 App 步骤（**Checks: Read & write**、PEM 两路径、`installation_id`、HMAC/smee FAQ）：[docs/e2e-demo.md](./docs/e2e-demo.md#可选真-app)。
+
 ## 本地 Webhook：smee + HMAC
 
 即使用 [smee.io](https://smee.io/) 转发，也应对 body 做 HMAC（与 GitHub 生产一致）。
