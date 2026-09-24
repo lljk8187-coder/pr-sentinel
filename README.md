@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **1.1.0 / Phase6**：M22 TestClient 警告消噪、M23 嵌套未知键剥离、M24 webhook 限流/体长、M25 版本对齐。真 App E2E **可选**（非硬门禁）。Phase5（1.0.0）：live fail-fast / smoke 脚手架 / console ops。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。Phase3（M13）：`check_run_url`、结构化日志、`GET /metrics`。
+GitHub PR 质量闸门 — **1.2.0 / Phase7**：分析质量收口（M26 skipped_tests + dangerous_commands / secrets 默认加 `ghp_`/`sk-`；M27 `llm_parse_soft`、去掉合成 info Finding；M28 `ignore_paths` 文档边界 + 契约测；M29 版本对齐）。真 App E2E **可选**（非硬门禁）。Phase6（1.1.0）：webhook 限流/体长 / 嵌套配置 / TestClient 消噪。Phase5（1.0.0）：live fail-fast / smoke 脚手架 / console ops。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -306,11 +306,13 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **M25**：版本对齐 **1.1.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.1`。
 - **Notes**：真 GitHub App / live E2E **可选**，不是 1.1.0 硬门禁。
 
-## Phase7 M28：ignore_paths 体验澄清（文档 / 契约）
+## Phase7（1.2.0）：分析质量与发布
 
-- 文档写清：`pathspec` GitIgnoreSpec、默认 `docs/**` + `**/*.md`、规则+LLM 共用 `filter_ignored`、**不读** `.gitignore`、list 整表替换与 `[]` 不过滤、默认 md 密钥扫不到。
-- **不做**：自动合并 `.gitignore`、换 path 库、升 1.2、改规则/LLM 过滤逻辑（默认行为不变）。
-- 契约测：`ignore_paths: []` 时 `README.md` / `notes.md` 进 kept，可被 secrets 等规则扫到。
+- **M26**：规则 `skipped_tests` + `dangerous_commands`；secrets 默认模式加 `ghp_` / `sk-`。
+- **M27**：`llm_parse_soft` — LLM 无法解析为结构化 findings 时降级忽略；去掉合成 info Finding。
+- **M28**：`ignore_paths` 文档边界（pathspec GitIgnoreSpec、默认 `docs/**` + `**/*.md`、规则+LLM 共用 `filter_ignored`、**不读** `.gitignore`、list 整表替换与 `[]` 不过滤）；契约测 `ignore_paths: []` 时 md 进 kept 可被 secrets 扫到。默认过滤逻辑不变。
+- **M29**：版本对齐 **1.2.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.2`（子包 `pr-sentinel-github` 仍 0.2.0；smoke UA `pr-sentinel-smoke/0.1` 未动）。
+- **Notes**：真 GitHub App / live E2E **可选**，不是 1.2.0 硬门禁。
 
 ## Phase5（1.0.0）：就绪发布
 

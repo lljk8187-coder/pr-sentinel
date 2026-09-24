@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-09-24
+
+Phase7 analysis-quality release. **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
+
+### Added
+- **M26**: Rules `skipped_tests` + `dangerous_commands`; default secrets patterns add `ghp_` / `sk-`.
+- **M27**: `llm_parse_soft` — soft-degrade when LLM output is not structured findings; remove synthetic info Finding.
+- **M28**: `ignore_paths` documentation boundaries + empty-list contract tests (no behavior change to default filter).
+- **M29**: Version alignment to **1.2.0** across `pyproject.toml`, FastAPI `version`, GitHub `User-Agent` (`pr-sentinel/1.2`), README, and this changelog.
+
 ## [1.1.0] — 2026-09-24
 
 Phase6 hardening release. **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
