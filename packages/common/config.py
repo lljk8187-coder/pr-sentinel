@@ -68,10 +68,11 @@ def _type_ok(expected: Any, actual: Any) -> bool:
 def validate_config(config: dict[str, Any]) -> list[str]:
     """Sanitize *config* in-place against ``DEFAULT_CONFIG`` shape; return notes.
 
-    - Unknown top-level keys → stripped + note
+    - Unknown keys at any mapping layer (top-level or nested) → stripped + note
+      with dotted path (e.g. ``diff.nope``, ``rules.secrets.typo_key``)
     - Type mismatches → key reverted to DEFAULT + note
     - Enums: ``update_strategy``, ``analyzer.mode`` → invalid → default + note
-    - Nested dicts walk known paths only; never raises (job must continue)
+    - Nested dicts walk known paths; list leaves are not schema-walked; never raises
     """
     notes: list[str] = []
     if not isinstance(config, dict):
@@ -80,13 +81,14 @@ def validate_config(config: dict[str, Any]) -> list[str]:
 
     defaults = DEFAULT_CONFIG
 
-    # Strip unknown top-level keys
-    unknown = [k for k in list(config.keys()) if k not in defaults]
-    for k in unknown:
-        del config[k]
-        notes.append(f"忽略未知配置项 `{k}`。")
-
     def walk(cfg: dict[str, Any], dft: dict[str, Any], path: str) -> None:
+        # Strip unknown keys at this mapping layer (including root)
+        unknown = [k for k in list(cfg.keys()) if k not in dft]
+        for key in unknown:
+            loc = f"{path}.{key}" if path else key
+            del cfg[key]
+            notes.append(f"忽略未知配置项 `{loc}`。")
+
         for key, default_val in dft.items():
             loc = f"{path}.{key}" if path else key
             if key not in cfg:
@@ -159,7 +161,7 @@ def load_config_from_text(
         notes.append("`.pr-sentinel.yml` 为空，仅使用内置 DEFAULT_CONFIG。")
         return base, notes
 
-    # Validate overlay shape first (strip unknown top-level / bad types on overlay),
+    # Validate overlay shape first (strip unknown keys at any layer / bad types),
     # then merge; validate again on merged so nested defaults stay consistent.
     overlay_notes = validate_config(overlay)
     notes.extend(overlay_notes)

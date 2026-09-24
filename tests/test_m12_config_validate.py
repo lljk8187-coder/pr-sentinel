@@ -89,3 +89,41 @@ def test_load_config_still_succeeds_on_garbage_types():
     assert cfg["check_run"] is True
     assert cfg["inline_comments"] is True
     assert notes  # has validation notes
+
+
+def test_validate_nested_unknown_keys_stripped():
+    """M23: nested typos under known mappings are stripped with dotted-path notes."""
+    cfg = get_default_config()
+    cfg["diff"]["nope"] = 1
+    cfg["diff"]["max_pages"] = 9
+    cfg["rules"]["secrets"]["typo_key"] = True
+    cfg["rules"]["secrets"]["enabled"] = False
+    notes = validate_config(cfg)
+    assert "nope" not in cfg["diff"]
+    assert "typo_key" not in cfg["rules"]["secrets"]
+    assert cfg["diff"]["max_pages"] == 9
+    assert cfg["rules"]["secrets"]["enabled"] is False
+    assert any("`diff.nope`" in n or "diff.nope" in n for n in notes)
+    assert any("rules.secrets.typo_key" in n for n in notes)
+
+
+def test_load_config_nested_unknown_keys_stripped():
+    """M23: yml with nested unknown keys loads without crash; legal overlay kept."""
+    yml = """
+diff:
+  max_pages: 7
+  nope: 1
+rules:
+  secrets:
+    enabled: false
+    typo_key: true
+"""
+    cfg, notes = load_config_from_text(yml)
+    assert isinstance(cfg, dict)
+    assert "nope" not in cfg["diff"]
+    assert "typo_key" not in cfg["rules"]["secrets"]
+    assert cfg["diff"]["max_pages"] == 7
+    assert cfg["rules"]["secrets"]["enabled"] is False
+    assert any("diff.nope" in n for n in notes)
+    assert any("rules.secrets.typo_key" in n for n in notes)
+    assert any("深度合并" in n for n in notes)
