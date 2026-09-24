@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from .findings_merge import merge_findings
 from .llm import LLMReviewResult, max_severity, review_with_llm
 from .rules import Finding, RulesEngine
 
@@ -285,7 +286,7 @@ class RulesLLMAnalyzer:
             head_sha=head_sha,
             http_client=http_client,
         )
-        merged = list(findings) + list(llm_result.findings)
+        merged = merge_findings(list(findings) + list(llm_result.findings))
         md = build_rules_report(
             kept,
             head_sha=head_sha,
