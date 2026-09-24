@@ -180,6 +180,8 @@ python scripts/preflight_live.py
 
 通过后再按上文启动 compose / smee 并开 PR。
 
+联调结束后可选用证据模板落盘（不强制）：[docs/records/TEMPLATE-live-e2e.md](./records/TEMPLATE-live-e2e.md)（说明见 [docs/records/README.md](./records/README.md)）。
+
 ## Live FAQ（`USE_FIXTURES=false`）
 
 | 现象 | 说明 / 排查 |

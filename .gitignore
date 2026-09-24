@@ -28,3 +28,16 @@ htmlcov/
 *.pem
 *.key
 secrets/
+
+# M36: live e2e evidence — keep TEMPLATE + docs/records/README.md; ignore secrets & filled copies
+docs/records/**/secrets*
+docs/records/**/secret*
+docs/records/local-*
+docs/records/**/*-filled.md
+docs/records/**/*.png
+docs/records/**/*.jpg
+docs/records/**/*.jpeg
+docs/records/**/*.webp
+docs/records/**/*.gif
+!docs/records/README.md
+!docs/records/TEMPLATE-live-e2e.md
