@@ -68,8 +68,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="pr-sentinel",
-    version="1.2.0",
-    description="Phase7 1.2.0: analysis quality M26–M28 (skipped_tests/dangerous_commands, llm_parse_soft, ignore_paths docs; real App e2e optional)",
+    version="1.3.0",
+    description="Phase8 1.3.0: output & console M30–M32 (merge_findings, sticky clamp/severity sort, job detail source/rule_id; real App e2e optional)",
     lifespan=lifespan,
 )
 

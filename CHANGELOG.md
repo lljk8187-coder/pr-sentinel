@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-09-24
+
+Phase8 output & console release. **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
+
+### Added
+- **M30**: `merge_findings` — cross-source dedup by `(path, line)`; keep higher severity and record `meta.sources`; wired into `RulesLLMAnalyzer`.
+- **M31**: Sticky summary body hard-capped ~60000 with truncated marker (avoid GitHub 422); report findings sorted by severity; optional inline detail ~2k clamp.
+- **M32**: Console job detail findings table columns for `source` / `rule_id` (meta fallback).
+- **M33**: Version alignment to **1.3.0** across `pyproject.toml`, FastAPI `version`, GitHub `User-Agent` (`pr-sentinel/1.3`), README, and this changelog.
+
 ## [1.2.0] — 2026-09-24
 
 Phase7 analysis-quality release. **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
