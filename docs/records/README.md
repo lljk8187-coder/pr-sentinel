@@ -2,6 +2,12 @@
 
 本目录用于 **可选** 记录一次真实 GitHub App / live 端到端联调的证据摘要，方便复盘与验收对照。
 
+## 已入库证据（脱敏）
+
+| 记录 | 说明 |
+| --- | --- |
+| [2026-09-24-phase11-live-e2e.md](./2026-09-24-phase11-live-e2e.md) | **首份填好的真 App live 证明**（Phase11 / 1.6.0）：App `pr-sentinel-live-e2e` → smee → HMAC → Check Run + sticky + inline（rules secrets）；触发 PR 未合入 main |
+
 ## 何时填
 
 | 场景 | 是否需要 |
@@ -10,7 +16,7 @@
 | 即将或刚完成 **真 App + smee + 开 PR** 联调 | 建议：复制模板填一份 |
 | CI / 日常开发 | 不需要 |
 
-**本里程碑不强制**产生真实联调附件或填好的记录；有模板与约定即可。
+**默认不强制**每人再跑一遍真 App；仓库已有首份脱敏 live 证明（上表）。日常仍以 fixtures smoke 为主。
 
 ## 怎么用
 

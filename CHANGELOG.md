@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-09-24
+
+Phase11 live-proof release: first sanitized real GitHub App end-to-end success on record. **Notes:** live E2E remains **optional** for others (fixtures smoke is still the default path); not a hard gate to develop or CI.
+
+### Added
+- **Phase11**: Sanitized live e2e evidence [`docs/records/2026-09-24-phase11-live-e2e.md`](./docs/records/2026-09-24-phase11-live-e2e.md) — App `pr-sentinel-live-e2e` (id 5057274) → smee → HMAC webhook → host Redis/Postgres/uvicorn/arq → Check Run + sticky + inline (rules `secrets`); LLM skipped (no OpenAI key). Preflight PASS before PR. Trigger fixture stayed on PR branch only (not merged to main).
+- Version alignment to **1.6.0** (`pyproject.toml`, FastAPI `version`, User-Agent `pr-sentinel/1.6`, README, this changelog). Subpackage `pr-sentinel-github` stays **0.2.0**; smoke UA `pr-sentinel-smoke/0.1` unchanged.
+
 ## [1.5.0] — 2026-09-24
 
 Phase10 golden-sampling release (loader / rules+llm goldens / score). **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
