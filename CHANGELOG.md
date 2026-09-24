@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec.v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-24
+
+Phase6 hardening release. **Notes:** real GitHub App / live E2E remains **optional**, not a hard gate.
+
+### Added
+- **M24**: Webhook body Content-Length/body oversize → **413** (default 1 MiB); Redis `INCR`+`EXPIRE` rate limit → **429** (default 120/60s); order rate-limit → body-size → HMAC; no slowapi.
+- **M23**: `validate_config` nested walk strips unknown keys with path notes (still soft).
+- **M22**: pytest `filterwarnings` silence Starlette TestClient / anyio BlockingPortal deprecation (keep sync TestClient).
+- **M25**: Version alignment to **1.1.0** across `pyproject.toml`, FastAPI `version`, GitHub `User-Agent` (`pr-sentinel/1.1`), README, and this changelog.
+
 ## [1.0.0] — 2026-09-24
 
 Phase5 readiness release. **Notes:** real GitHub App / live E2E is **optional**, not a hard gate for 1.0.0.

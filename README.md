@@ -1,6 +1,6 @@
 # PR Sentinel
 
-GitHub PR 质量闸门 — **1.0.0 / Phase5** 就绪：M18 live fail-fast、M19 无真 App smoke 脚手架、M20 控制台 ops UX、M21 版本对齐。真 App E2E **可选**（非硬门禁）。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。Phase3（M13）：`check_run_url`、结构化日志、`GET /metrics`。
+GitHub PR 质量闸门 — **1.1.0 / Phase6**：M22 TestClient 警告消噪、M23 嵌套未知键剥离、M24 webhook 限流/体长、M25 版本对齐。真 App E2E **可选**（非硬门禁）。Phase5（1.0.0）：live fail-fast / smoke 脚手架 / console ops。Phase4（0.10.0）：出站脱敏 / Worker 韧性 / compose health。Phase3（M13）：`check_run_url`、结构化日志、`GET /metrics`。
 
 > 本阶段 **不做** 完整 SaaS 多租户 / Alembic / ORM；Redis **不**再存 jobs（仅 delivery 去重 + arq）。
 
@@ -291,6 +291,14 @@ Marker（按 PR 稳定，**不**随 `head_sha` 变）：
 - **结构化日志**：webhook 入队/去重与 worker `process_pr` 状态转换日志带可检索字段 `delivery_id` / `job_id` / `sha`（短 12 位）。
 - **指标**：`/console` 按当前列表任务的 `status` 聚合计数；可选 `GET /metrics` 返回进程内计数（无 prometheus）。
 
+
+## Phase6（1.1.0）：硬化与发布
+
+- **M22**：pytest `filterwarnings` 消 Starlette TestClient / anyio BlockingPortal 弃用警告（保留同步 TestClient）。
+- **M23**：`validate_config` 嵌套 walk 剥未知键 + 路径 note（仍 soft）。
+- **M24**：webhook Content-Length/body 超限 → 413（默认 1MiB）；Redis INCR+EXPIRE 限流 → 429（默认 120/60s）；顺序限流→体长→HMAC；无 slowapi。
+- **M25**：版本对齐 **1.1.0** + [CHANGELOG.md](./CHANGELOG.md)；User-Agent `pr-sentinel/1.1`。
+- **Notes**：真 GitHub App / live E2E **可选**，不是 1.1.0 硬门禁。
 
 ## Phase5（1.0.0）：就绪发布
 
