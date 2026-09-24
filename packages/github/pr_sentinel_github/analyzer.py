@@ -57,6 +57,32 @@ def build_report(
     )
 
 
+
+def _severity_rank_local(severity: str) -> int:
+    return {
+        "critical": 4,
+        "error": 3,
+        "high": 3,
+        "warning": 2,
+        "medium": 2,
+        "info": 1,
+        "low": 1,
+    }.get((severity or "info").lower(), 1)
+
+
+def _sort_findings_by_severity(items: list[Finding]) -> list[Finding]:
+    """Higher severity first (error > warning > info / aliases)."""
+    return sorted(
+        items,
+        key=lambda f: (
+            -_severity_rank_local(f.severity),
+            f.rule_id or "",
+            f.filename or "",
+            f.line if f.line is not None else -1,
+        ),
+    )
+
+
 def _severity_emoji(severity: str) -> str:
     return {
         "critical": "🛑",
@@ -154,7 +180,7 @@ def build_rules_report(
             by_rule.setdefault(fnd.rule_id, []).append(fnd)
         for rule_id, items in by_rule.items():
             lines.append(f"#### `{rule_id}` ({len(items)})")
-            for item in items:
+            for item in _sort_findings_by_severity(items):
                 lines.append(_format_finding_line(item))
             lines.append("")
 
@@ -170,7 +196,7 @@ def build_rules_report(
     elif not llm_findings:
         lines.append("无 LLM 发现问题。")
     else:
-        for item in llm_findings:
+        for item in _sort_findings_by_severity(llm_findings):
             lines.append(_format_finding_line(item))
     lines.append("")
 

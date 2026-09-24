@@ -191,10 +191,16 @@ def _patches_by_path(
     return out
 
 
+_INLINE_DETAIL_MAX = 2_000
+
+
 def _human_inline_body(finding: Finding) -> str:
     body = f"**[{finding.severity}]** {finding.message}"
     if finding.detail:
-        body += f"\n\n{finding.detail}"
+        detail = finding.detail
+        if len(detail) > _INLINE_DETAIL_MAX:
+            detail = detail[:_INLINE_DETAIL_MAX] + "\n\n… (detail truncated)"
+        body += f"\n\n{detail}"
     return body
 
 

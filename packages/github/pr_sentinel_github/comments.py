@@ -11,6 +11,38 @@ logger = logging.getLogger(__name__)
 
 VALID_STRATEGIES = frozenset({"update", "recreate", "skip_if_exists"})
 
+# GitHub issue comment body soft ceiling (~65k hard); stay under to avoid 422.
+STICKY_BODY_MAX = 60_000
+STICKY_TRUNCATION_MARK = "<!-- pr-sentinel:truncated -->"
+STICKY_TRUNCATION_NOTE = (
+    f"\n\n{STICKY_TRUNCATION_MARK}\n\n"
+    "> ⚠️ **报告已截断**（sticky 正文超过约 60000 字符，避免 GitHub 评论体过长 422）。"
+)
+
+
+def clamp_sticky_body(
+    marker: str,
+    report_body: str,
+    *,
+    limit: int = STICKY_BODY_MAX,
+) -> tuple[str, bool]:
+    """Build sticky body ``marker + report``; truncate report if over *limit*.
+
+    Returns ``(body, truncated)``. Marker always preserved at the start.
+    """
+    body = f"{marker}\n{report_body}"
+    if len(body) <= limit:
+        return body, False
+    note = STICKY_TRUNCATION_NOTE
+    prefix = f"{marker}\n"
+    budget = limit - len(prefix) - len(note)
+    if budget < 0:
+        # Extreme: keep marker + as much of note as fits.
+        clipped = (prefix + note)[:limit]
+        return clipped, True
+    return prefix + report_body[:budget] + note, True
+
+
 
 def summary_marker(owner: str, repo: str, pr_number: int) -> str:
     """Sticky marker: ``<!-- pr-sentinel:summary:{owner}/{repo}:{pr_number} -->``."""
@@ -51,7 +83,16 @@ def upsert_pr_comment(
         strategy = "update"
 
     marker = summary_marker(owner, repo, pr_number)
-    body = f"{marker}\n{report_body}"
+    body, body_truncated = clamp_sticky_body(marker, report_body)
+    if body_truncated:
+        logger.warning(
+            "sticky body truncated for %s/%s#%s (len was %s, limit %s)",
+            owner,
+            repo,
+            pr_number,
+            len(marker) + 1 + len(report_body),
+            STICKY_BODY_MAX,
+        )
 
     comments = client.list_issue_comments(owner, repo, pr_number)
     existing = find_summary_comment(comments, owner, repo, pr_number)
