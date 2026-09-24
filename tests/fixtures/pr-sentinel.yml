@@ -19,5 +19,9 @@ rules:
     max_additions: 2000
   weakened_tests:
     enabled: true
+  skipped_tests:
+    enabled: true
+  dangerous_commands:
+    enabled: true
 analyzer:
   mode: rules

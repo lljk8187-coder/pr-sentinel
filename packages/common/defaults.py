@@ -27,6 +27,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "patterns": [
                 r"AKIA[0-9A-Z]{16}",
                 r"-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----",
+                r"ghp_[A-Za-z0-9_]{20,}",
+                r"sk-[A-Za-z0-9]{20,}",
             ],
         },
         "large_files": {
@@ -52,6 +54,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "weakened_tests": {
             "enabled": True,
+        },
+        "skipped_tests": {
+            "enabled": True,
+        },
+        "dangerous_commands": {
+            "enabled": True,
+            "patterns": [
+                r"curl\b[^|\n]*\|\s*(?:ba)?sh\b",
+                r"wget\b[^|\n]*\|\s*(?:ba)?sh\b",
+                r"\brm\s+-[^\n]*\brf\b[^\n]*\s+/(?:\s|$|\*)",
+                r"\brm\s+-[^\n]*\bfr\b[^\n]*\s+/(?:\s|$|\*)",
+                r"\bchmod\s+777\b",
+            ],
         },
     },
     "privacy": {

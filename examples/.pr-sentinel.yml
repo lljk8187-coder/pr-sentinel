@@ -18,6 +18,8 @@ rules:
     patterns:
       - "AKIA[0-9A-Z]{16}"
       - "-----BEGIN (RSA |OPENSSH )?PRIVATE KEY-----"
+      - "ghp_[A-Za-z0-9_]{20,}"
+      - "sk-[A-Za-z0-9]{20,}"
   large_files:
     enabled: true
     max_bytes: 1048576      # patch 字节阈值
@@ -25,6 +27,16 @@ rules:
     binary_extensions: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".whl", ".exe", ".dll", ".so", ".dylib", ".bin"]
   weakened_tests:
     enabled: true
+  skipped_tests:
+    enabled: true
+  dangerous_commands:
+    enabled: true
+    patterns:
+      - "curl\\b[^|\\n]*\\|\\s*(?:ba)?sh\\b"
+      - "wget\\b[^|\\n]*\\|\\s*(?:ba)?sh\\b"
+      - "\\brm\\s+-[^\\n]*\\brf\\b[^\\n]*\\s+/(?:\\s|$|\\*)"
+      - "\\brm\\s+-[^\\n]*\\bfr\\b[^\\n]*\\s+/(?:\\s|$|\\*)"
+      - "\\bchmod\\s+777\\b"
 privacy:
   redact_secrets: true   # redact before sending patch text to LLM
 llm:

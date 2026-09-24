@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from .base import Finding, Rule
+from .dangerous_commands import DangerousCommandsRule
 from .ignore_paths import filter_ignored
 from .large_files import LargeFilesRule
 from .secrets import SecretsRule
+from .skipped_tests import SkippedTestsRule
 from .weakened_tests import WeakenedTestsRule
 
 # Re-export for convenience
@@ -15,7 +17,13 @@ __all__ = ["RulesEngine", "filter_ignored", "run_rules", "default_rules"]
 
 
 def default_rules() -> list[Rule]:
-    return [SecretsRule(), LargeFilesRule(), WeakenedTestsRule()]
+    return [
+        SecretsRule(),
+        LargeFilesRule(),
+        WeakenedTestsRule(),
+        SkippedTestsRule(),
+        DangerousCommandsRule(),
+    ]
 
 
 def run_rules(
